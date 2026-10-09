@@ -14,6 +14,7 @@ if PROJECT_ROOT not in sys.path:
 from scoring.care_access_score import calculate_care_access_score
 from database.db import get_all_sites, get_all_events, get_site_by_id, get_event_by_id
 from utils.geo import geocode_location, haversine_distance, get_user_current_zip
+from utils.dates import today_str
 
 
 def log_debug(msg):
@@ -87,7 +88,7 @@ def tool_simulate_user_journey(persona: str, service: str, location: str, timing
     """
     lat, lon, label = geocode_location(location)
     sites = get_all_sites()
-    events = get_all_events(include_expired=False, current_date_str="2026-09-16")
+    events = get_all_events(include_expired=False, current_date_str=today_str())
     all_recs = sites + events
 
     matched = []
@@ -106,7 +107,7 @@ def tool_simulate_user_journey(persona: str, service: str, location: str, timing
             distance_miles=dist,
             timing_pref=timing,
             user_income_band="Under $25k",
-            reference_date_str="2026-09-16"
+            reference_date_str=today_str()
         )
 
         matched.append({

@@ -9,7 +9,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from utils.styles import BANNER_PATH, LOGO_PATH, get_banner_base64, get_logo_base64, render_brand_header
+from utils.styles import (BANNER_PATH, LOGO_PATH, MARK_PATH, WORDMARK_PATH, TAGLINE,
+                          get_banner_base64, get_logo_base64, render_brand_header)
 
 
 def test_banner_file_exists_and_valid():
@@ -47,8 +48,23 @@ def test_logo_asset_integrity():
     assert len(logo_b64) > 100
 
 
+def test_brand_mark_and_wordmark_assets():
+    """Verify the logo mark and wordmark used in the Home logo bar exist and are transparent PNGs."""
+    for path in (MARK_PATH, WORDMARK_PATH):
+        assert os.path.exists(path), f"Missing brand asset: {path}"
+        with Image.open(path) as img:
+            assert img.format == "PNG"
+            assert img.mode == "RGBA", "Brand images should have a transparent background"
+
+
+def test_tagline_is_one_honest_line():
+    """The tagline promises free AND low-cost care (results include sliding-scale clinics)."""
+    assert TAGLINE == "Free & low-cost care. Know where to go."
+    assert len(TAGLINE) <= 45, "Tagline should fit on one line on a phone"
+
+
 def test_brand_header_rendering(monkeypatch):
-    """Verify render_brand_header produces expected HTML markup with the new banner."""
+    """Verify render_brand_header produces the logo bar: mark, wordmark and tagline."""
     rendered_markdowns = []
 
     def mock_markdown(body, unsafe_allow_html=False):
@@ -61,14 +77,14 @@ def test_brand_header_rendering(monkeypatch):
     assert len(rendered_markdowns) == 1
     content = rendered_markdowns[0]
 
-    # Verify it references the new banner container and tagline alt text
-    assert "brand-hero-banner" in content
-    assert "Free care. No insurance. Know where to go." in content
-    assert "data:image/png;base64," in content
+    assert "cz-brand" in content
+    assert "Free &amp; low-cost care. Know where to go." in content
+    assert content.count("data:image/png;base64,") == 2, "Expected the mark and the wordmark images"
+    assert 'alt="CareAtZero"' in content
 
 
 def test_brand_header_fallback_rendering(monkeypatch):
-    """Verify fallback rendering when banner image is unavailable."""
+    """Verify the logo bar falls back to text when the brand images are unavailable."""
     rendered_markdowns = []
 
     def mock_markdown(body, unsafe_allow_html=False):
@@ -77,14 +93,14 @@ def test_brand_header_fallback_rendering(monkeypatch):
     import streamlit as st
     monkeypatch.setattr(st, "markdown", mock_markdown)
     import utils.styles as styles_mod
-    monkeypatch.setattr(styles_mod, "get_banner_base64", lambda: "")
+    monkeypatch.setattr(styles_mod, "_file_base64", lambda path: "")
 
     render_brand_header()
     assert len(rendered_markdowns) == 1
     content = rendered_markdowns[0]
 
-    # Verify fallback markup matches the new identity
-    assert "brand-hero" in content
-    assert "Free care. No insurance. Know where to go." in content
+    assert "cz-brand" in content
+    assert "Free &amp; low-cost care. Know where to go." in content
     assert "CareAt" in content
     assert "Zero" in content
+    assert "data:image/png;base64," not in content

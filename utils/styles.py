@@ -8,522 +8,251 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import base64
-from database.db import get_all_saved_care
 
 LOGO_PATH = os.path.join(PROJECT_ROOT, "assets", "logo.png")
 BANNER_PATH = os.path.join(PROJECT_ROOT, "assets", "brand_banner.png")
+MARK_PATH = os.path.join(PROJECT_ROOT, "assets", "brand_mark.png")          # the "CO" mark, transparent
+WORDMARK_PATH = os.path.join(PROJECT_ROOT, "assets", "brand_wordmark.png")  # "CareAtZero" in the logo's lettering
 
-def get_logo_base64() -> str:
-    """Returns base64 encoded string of the brand logo for inline HTML embedding."""
-    if os.path.exists(LOGO_PATH):
+# One line under the logo. "Free & low-cost" because results include sliding-scale
+# clinics, and the app only labels something Free when the source says so.
+TAGLINE = "Free & low-cost care. Know where to go."
+
+# Bottom tab bar: (label, Material icon, page key, page file)
+NAV_TABS = [
+    ("Home", ":material/home:", "home", "app.py"),
+    ("Find", ":material/search:", "find_care", "pages/1_🔍_Find_Free_Care.py"),
+    ("Help", ":material/call:", "help", "pages/3_📞_Get_Help.py"),
+    ("About", ":material/info:", "about", "pages/4_ℹ️_About_&_Safety.py"),
+]
+
+
+def _file_base64(path: str) -> str:
+    if os.path.exists(path):
         try:
-            with open(LOGO_PATH, "rb") as f:
+            with open(path, "rb") as f:
                 return base64.b64encode(f.read()).decode("utf-8")
         except Exception:
             return ""
     return ""
+
+
+def get_logo_base64() -> str:
+    """Returns base64 encoded string of the brand logo for inline HTML embedding."""
+    return _file_base64(LOGO_PATH)
 
 
 def get_banner_base64() -> str:
     """Returns base64 encoded string of the brand hero banner for inline HTML embedding."""
-    if os.path.exists(BANNER_PATH):
-        try:
-            with open(BANNER_PATH, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
-        except Exception:
-            return ""
-    return ""
+    return _file_base64(BANNER_PATH)
 
 
 def inject_custom_css():
-    """Injects high-quality, mobile-first responsive PWA CSS styling into Streamlit."""
+    """
+    Mobile app styling. The whole app is a phone-width column (so it also looks like
+    a phone app on a laptop), Streamlit's own menus are hidden, and a tab bar is
+    pinned to the bottom.
+
+    Layout rule: columns always stack into one column, like on a phone. To keep a
+    row of buttons side by side, put it in st.container(key="row_...").
+    """
     st.markdown("""
     <style>
-    /* Global styles and modern typography */
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
-
-    html, body, [class*="css"] {
-        font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap');
+    :root {
+        --navy: #0E2A5C; --blue: #0B5FD6; --blue-50: #E6F0FD; --teal: #0A7C74; --teal-50: #E2F4F1;
+        --red: #B42318; --red-50: #FDECEC; --ink: #0E2A5C; --ink-soft: #3D4B61; --ink-faint: #55637A;
+        --line: #E2E8F0; --bg: #F4F7FA;
+    }
+    html, body, [class*="st-"], button, input, textarea, select {
+        font-family: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         -webkit-tap-highlight-color: transparent;
-        -webkit-touch-callout: none;
     }
+    .material-symbols-rounded, [data-testid="stIconMaterial"] { font-family: 'Material Symbols Rounded' !important; }
 
-    /* Fix Streamlit Header & Mobile Top Clearance */
-    header[data-testid="stHeader"] {
-        background: rgba(255, 255, 255, 0.90) !important;
-        backdrop-filter: blur(12px) !important;
-        -webkit-backdrop-filter: blur(12px) !important;
-        z-index: 99 !important;
+    /* ---- phone-width app column; Streamlit's own chrome hidden ---- */
+    header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"],
+    #MainMenu, footer, .stDeployButton, [class*="viewerBadge"],
+    section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
+    button[data-testid="stSidebarCollapseButton"] { display: none !important; }
+    [data-testid="stAppViewContainer"] { background: #DDE4EC; }
+    .block-container, [data-testid="stMainBlockContainer"] {
+        max-width: 440px !important; min-height: 100vh; background: var(--bg);
+        padding: 14px 16px 110px !important; box-shadow: 0 0 40px rgba(14,42,92,0.12);
+        flex: 0 0 auto !important;  /* don't shrink to screen height; keeps the end of the page clear of the tab bar */
     }
+    @media (max-width: 480px) {
+        [data-testid="stAppViewContainer"] { background: var(--bg); }
+        .block-container, [data-testid="stMainBlockContainer"] { box-shadow: none; }
+    }
+    h1, h2, h3, h4 { color: var(--ink); letter-spacing: -0.01em; }
+    h3 { font-size: 20px !important; font-weight: 800 !important; }
+    h4 { font-size: 16px !important; font-weight: 800 !important; }
+    [data-testid="stHeaderActionElements"] { display: none !important; }
 
-    /* Container Padding with Full Top Clearance */
-    .block-container {
-        padding-top: 4.8rem !important;
-        padding-bottom: 6.5rem !important;
-        padding-left: 1.0rem !important;
-        padding-right: 1.0rem !important;
-        max-width: 900px;
-    }
+    /* ---- every row of columns stacks, like on a phone ... ---- */
+    [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+    [data-testid="stColumn"] { flex: 1 1 100% !important; min-width: 100% !important; width: 100% !important; }
+    /* ... except rows put in st.container(key="row_...") */
+    [class*="st-key-row"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 8px !important; }
+    [class*="st-key-row"] [data-testid="stColumn"] { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; }
 
+    /* ---- brand bar (Home) ---- */
+    .cz-brand { display: flex; align-items: center; gap: 10px; padding: 2px 0 12px; }
+    .cz-brand-mark { height: 46px; width: auto; }
+    .cz-brand-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .cz-brand-word { height: 23px; width: auto; align-self: flex-start; }
+    .cz-brand-name { font-size: 24px; font-weight: 800; color: var(--navy); line-height: 1; }
+    .cz-brand-name span { color: var(--teal); }
+    .cz-tagline { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
+    .cz-title { font-size: 28px; font-weight: 800; line-height: 1.12; letter-spacing: -0.5px; margin: 4px 0 4px; color: var(--ink); }
+    .cz-sub { font-size: 15px; color: var(--ink-faint); margin-bottom: 10px; }
 
-    /* Hide default Streamlit multi-page sidebar on small screens to give full mobile app feel */
-    @media (max-width: 768px) {
-        section[data-testid="stSidebar"] {
-            display: none !important;
-        }
-        button[data-testid="stSidebarCollapseButton"] {
-            display: none !important;
-        }
-    }
+    /* ---- 911 / 988 quick-call buttons ---- */
+    .emergency-banner { display: flex; gap: 8px; margin: 4px 0 14px; }
+    .emergency-banner a { flex: 1; text-align: center; text-decoration: none !important; border-radius: 12px;
+                          padding: 10px 6px; font-size: 14px; font-weight: 800; }
+    .cz-em-red { background: var(--red-50); color: var(--red) !important; }
+    .cz-em-blue { background: var(--blue-50); color: #0A3D91 !important; }
 
-    /* Top Mobile App Bar */
-    .mobile-app-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 10px 14px;
-        margin-bottom: 12px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    /* ---- bottom tab bar ---- */
+    .st-key-cz_nav {
+        position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); z-index: 1000;
+        width: 100%; max-width: 440px; background: #FFFFFF; border-top: 1px solid var(--line);
+        padding: 6px 6px calc(14px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box;
     }
-    .app-brand-badge {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-weight: 800;
-        font-size: 1.05rem;
-        color: #1E40AF;
-        text-decoration: none;
+    .st-key-cz_nav [data-testid="stHorizontalBlock"] { gap: 0 !important; }
+    .st-key-cz_nav button {
+        border: none !important; background: transparent !important; color: var(--ink-faint) !important;
+        min-height: 54px !important; padding: 4px 0 !important; box-shadow: none !important;
     }
+    .st-key-cz_nav button p { font-size: 12px !important; font-weight: 600; }
+    .st-key-cz_nav [data-testid="stIconMaterial"] { font-size: 24px !important; }
 
-    /* Top Emergency Alert Bar */
-    .emergency-banner {
-        background-color: #FEF2F2;
-        border: 1px solid #FCA5A5;
-        border-left: 4px solid #EF4444;
-        border-radius: 10px;
-        padding: 10px 14px;
-        margin-top: 0px;
-        margin-bottom: 18px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-size: 0.84rem;
-        color: #991B1B;
-        line-height: 1.4;
+    /* ---- care-type cards (2x2) ---- */
+    [class*="st-key-svc_"] button {
+        min-height: 78px; justify-content: flex-start !important; text-align: left; border-radius: 14px !important;
+        background: #FFFFFF !important; border: 1px solid var(--line) !important; color: var(--ink) !important;
+        padding: 8px 12px !important;
     }
-    .emergency-banner strong {
-        color: #7F1D1D;
+    [class*="st-key-svc_"] button[data-testid="stBaseButton-primary"] {
+        background: var(--teal-50) !important; border: 2px solid var(--teal) !important;
     }
+    [class*="st-key-svc_"] button p { font-size: 15px !important; font-weight: 700 !important; text-align: left; line-height: 1.25; }
+    [class*="st-key-svc_"] [data-testid="stIconMaterial"] { color: var(--teal) !important; font-size: 24px !important; }
 
+    /* ---- buttons and inputs ---- */
+    .stButton button, .stDownloadButton button, .stLinkButton a, .stFormSubmitButton button {
+        border-radius: 12px !important; min-height: 44px !important; font-weight: 700 !important;
+    }
+    .stFormSubmitButton button { min-height: 54px !important; box-shadow: 0 6px 16px rgba(10,124,116,0.25); }
+    .stFormSubmitButton button p { font-size: 17px !important; font-weight: 800 !important; }
+    [data-testid="stTextInput"] input { font-size: 17px; font-weight: 600; }
+    div[data-testid="stForm"] { border: none; padding: 0; }
 
-    /* Main Brand Hero & Banner */
-    .brand-hero-banner {
-        margin-bottom: 14px;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 8px 24px rgba(1, 22, 56, 0.28);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        background: #011638;
+    /* ---- badges ---- */
+    .badge-free, .badge-lowcost, .badge-sliding, .badge-event {
+        display: inline-block; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 800;
+        letter-spacing: 0.02em; text-transform: uppercase; margin: 0 4px 4px 0;
     }
-    .brand-hero-banner img {
-        width: 100%;
-        max-width: 900px;
-        height: auto;
-        display: block;
-        margin: 0 auto;
-        border-radius: 16px;
-    }
-    .brand-hero {
-        background: linear-gradient(135deg, #011638 0%, #03275A 50%, #011638 100%);
-        color: white;
-        padding: 22px 24px;
-        border-radius: 18px;
-        margin-bottom: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        box-shadow: 0 8px 24px rgba(1, 22, 56, 0.28);
-    }
-    .brand-title {
-        font-size: 2.15rem;
-        font-weight: 900;
-        margin: 0;
-        letter-spacing: -0.025em;
-        line-height: 1.15;
-    }
-    .brand-subtitle {
-        font-size: 0.94rem;
-        margin-top: 6px;
-        margin-bottom: 0;
-        color: #CBD5E1 !important;
-        line-height: 1.4;
-    }
+    .badge-free { background: #E2F4F1; color: #075E57; }
+    .badge-lowcost { background: #E6F0FD; color: #0A4BAA; }
+    .badge-sliding { background: #FFF2DE; color: #8A4B00; }
+    .badge-event { background: #FEF3C7; color: #92400E; }
 
-    /* Badges */
-    .badge-free {
-        display: inline-block;
-        background-color: #DCFCE7;
-        color: #15803D;
-        border: 1px solid #86EFAC;
-        padding: 3px 9px;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-    .badge-lowcost {
-        display: inline-block;
-        background-color: #E0F2FE;
-        color: #0369A1;
-        border: 1px solid #7DD3FC;
-        padding: 3px 9px;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-    .badge-sliding {
-        display: inline-block;
-        background-color: #EDE9FE;
-        color: #6D28D9;
-        border: 1px solid #C4B5FD;
-        padding: 3px 9px;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-    .badge-event {
-        display: inline-block;
-        background-color: #FEF3C7;
-        color: #B45309;
-        border: 1px solid #FCD34D;
-        padding: 3px 9px;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-
-    /* Care Result Card - Mobile Optimized */
+    /* ---- result and event cards ---- */
     .care-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 14px;
-        padding: 15px;
-        margin-bottom: 12px;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        background: #FFFFFF; border: 1px solid var(--line); border-radius: 18px;
+        padding: 14px 16px; margin-bottom: 8px;
     }
-    .care-card:hover {
-        border-color: #CBD5E1;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07);
-    }
-    .care-card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 8px;
-        flex-wrap: wrap;
-        gap: 6px;
-    }
-    .care-card-title {
-        font-size: 1.10rem;
-        font-weight: 700;
-        color: #0F172A;
-        margin: 0;
-        line-height: 1.3;
-    }
+    .care-card-header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+    .care-card-title { font-size: 18px; font-weight: 800; color: var(--ink); margin: 0; line-height: 1.25; }
     .score-badge {
-        background: #F0FDF4;
-        border: 1px solid #BBF7D0;
-        padding: 3px 9px;
-        border-radius: 8px;
-        font-size: 0.80rem;
-        font-weight: 700;
-        color: #15803D;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
+        background: var(--blue-50); padding: 4px 10px; border-radius: 8px; font-size: 13px;
+        font-weight: 700; color: #0A4BAA; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
     }
-    .card-meta {
-        font-size: 0.82rem;
-        color: #475569;
-        margin: 4px 0;
-        display: flex;
-        align-items: flex-start;
-        gap: 6px;
-        line-height: 1.35;
-    }
+    .card-meta { font-size: 14px; color: var(--ink-soft); margin: 4px 0; line-height: 1.4; }
     .reasons-box {
-        background-color: #F8FAFC;
-        border-left: 3px solid #3B82F6;
-        padding: 8px 10px;
-        border-radius: 0 8px 8px 0;
-        margin-top: 8px;
-        font-size: 0.78rem;
-        color: #334155;
+        background: var(--bg); padding: 8px 12px; border-radius: 10px; margin-top: 8px;
+        font-size: 13.5px; color: var(--ink-soft);
     }
-    .reasons-box ul {
-        margin: 3px 0 0 0;
-        padding-left: 15px;
-    }
-    .source-meta {
-        font-size: 0.72rem;
-        color: #94A3B8;
-        margin-top: 6px;
-    }
-
-    /* Stats Box on Home */
-    .stat-card {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 12px 8px;
-        text-align: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-    }
-    .stat-number {
-        font-size: 1.45rem;
-        font-weight: 800;
-        color: #2563EB;
-        margin: 0;
-    }
-    .stat-label {
-        font-size: 0.70rem;
-        font-weight: 600;
-        color: #64748B;
-        margin-top: 2px;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-    }
-
-    /* Trust Pill */
+    .reasons-box ul { margin: 3px 0 0 0; padding-left: 16px; }
+    .source-meta { font-size: 12.5px; color: var(--ink-faint); margin-top: 8px; }
     .trust-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        background: #F1F5F9;
-        color: #334155;
-        padding: 3px 9px;
-        border-radius: 9999px;
-        font-size: 0.74rem;
-        font-weight: 600;
+        display: inline-flex; align-items: center; gap: 5px; background: var(--bg); color: var(--ink-soft);
+        padding: 4px 10px; border-radius: 8px; font-size: 13px; font-weight: 600;
     }
 
-    /* Standard Button Styling */
-    .stButton > button {
-        border-radius: 10px !important;
-        font-weight: 600 !important;
-        font-size: 0.90rem !important;
-        min-height: 44px !important;
-        transition: all 0.15s ease !important;
-    }
-    .stButton > button:active {
-        transform: scale(0.97);
-    }
-
-    /* TOP NAVIGATION BAR (Header Navigation) */
-    div[data-testid="stHorizontalBlock"]:has(button[key^="topnav_"]) {
-        background: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
-        border-radius: 14px !important;
-        padding: 6px 8px !important;
-        margin-top: 0px !important;
-        margin-bottom: 12px !important;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05) !important;
-        display: flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-    }
-
-    div[data-testid="stHorizontalBlock"]:has(button[key^="topnav_"]) div[data-testid="column"] {
-        flex: 1 1 0 !important;
-        min-width: 0 !important;
-        padding: 0 2px !important;
-        margin: 0 !important;
-    }
-
-    div[data-testid="stHorizontalBlock"]:has(button[key^="topnav_"]) button {
-        min-height: 42px !important;
-        height: 42px !important;
-        font-size: 0.85rem !important;
-        font-weight: 600 !important;
-        line-height: 1.2 !important;
-        padding: 4px 6px !important;
-        border-radius: 10px !important;
-        white-space: nowrap !important;
-    }
-
-    /* FIXED MOBILE BOTTOM NAVIGATION DOCK (Native Streamlit Buttons Pinned) */
-    div[data-testid="stHorizontalBlock"]:has(button[key^="dock_"]) {
-        position: fixed !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        z-index: 999999 !important;
-        background: rgba(255, 255, 255, 0.96) !important;
-        backdrop-filter: blur(18px) !important;
-        -webkit-backdrop-filter: blur(18px) !important;
-        border-top: 1px solid #CBD5E1 !important;
-        box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.10) !important;
-        padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px !important;
-        margin: 0 !important;
-        display: flex !important;
-        justify-content: space-around !important;
-    }
-
-    div[data-testid="stHorizontalBlock"]:has(button[key^="dock_"]) div[data-testid="column"] {
-        flex: 1 1 0 !important;
-        min-width: 0 !important;
-        padding: 0 2px !important;
-        margin: 0 !important;
-    }
-
-    div[data-testid="stHorizontalBlock"]:has(button[key^="dock_"]) button {
-        min-height: 48px !important;
-        height: 48px !important;
-        font-size: 0.72rem !important;
-        line-height: 1.15 !important;
-        padding: 2px 2px !important;
-        border-radius: 8px !important;
-        white-space: pre-line !important;
-    }
-
-    /* Mobile view optimizations */
-    @media (max-width: 640px) {
-        .brand-title {
-            font-size: 1.35rem !important;
-        }
-        .brand-hero {
-            padding: 16px 12px !important;
-            border-radius: 12px !important;
-        }
-        .care-card {
-            padding: 12px !important;
-            border-radius: 12px !important;
-        }
-        .stat-number {
-            font-size: 1.25rem !important;
-        }
-        div[data-testid="stHorizontalBlock"]:has(button[key^="topnav_"]) button {
-            font-size: 0.75rem !important;
-            padding: 2px 4px !important;
-            min-height: 38px !important;
-            height: 38px !important;
-        }
-    }
+    /* ---- Help screen ---- */
+    .cz-help { border-radius: 18px; padding: 16px; margin-bottom: 12px; }
+    .cz-help h4 { margin: 0 0 4px !important; padding: 0 !important; }
+    .cz-help p { margin: 0 0 12px; font-size: 14px; }
+    .cz-help a { display: block; text-align: center; text-decoration: none !important; border-radius: 14px;
+                 padding: 15px; font-size: 18px; font-weight: 800; color: #FFFFFF !important; }
     </style>
     """, unsafe_allow_html=True)
 
 
 def render_brand_header():
-    """Renders the top CareAtZero brand hero banner matching the new brand visual identity."""
-    banner_b64 = get_banner_base64()
-    if banner_b64:
-        st.markdown(f"""
-        <div class="brand-hero-banner">
-            <img src="data:image/png;base64,{banner_b64}" alt="CareAtZero - Free care. No insurance. Know where to go." />
+    """Home-screen logo bar: the CO mark and CareAtZero lettering from the logo, tagline underneath."""
+    mark_b64 = _file_base64(MARK_PATH)
+    word_b64 = _file_base64(WORDMARK_PATH)
+    mark_html = (f'<img class="cz-brand-mark" src="data:image/png;base64,{mark_b64}" alt="">'
+                 if mark_b64 else "")
+    word_html = (f'<img class="cz-brand-word" src="data:image/png;base64,{word_b64}" alt="CareAtZero">'
+                 if word_b64 else '<div class="cz-brand-name">CareAt<span>Zero</span></div>')
+    st.markdown(f"""
+    <div class="cz-brand">
+        {mark_html}
+        <div class="cz-brand-text">
+            {word_html}
+            <div class="cz-tagline">{TAGLINE.replace('&', '&amp;')}</div>
         </div>
-        """, unsafe_allow_html=True)
-    else:
-        logo_b64 = get_logo_base64()
-        logo_html = f'''<img src="data:image/png;base64,{logo_b64}" style="width: 48px; height: 48px; border-radius: 12px; object-fit: cover; vertical-align: middle;" alt="CareAtZero Logo" />''' if logo_b64 else ""
-        st.markdown(f"""
-        <div class="brand-hero">
-            <div style="display: flex; align-items: center; gap: 16px;">
-                {logo_html}
-                <div>
-                    <h1 class="brand-title" style="margin: 0; line-height: 1.15;">
-                        <span style="color: #FFFFFF; font-weight: 900;">CareAt</span><span style="color: #00F0D4; font-weight: 900;">Zero</span>
-                    </h1>
-                    <p class="brand-subtitle" style="margin: 4px 0 0 0;">Free care. No insurance. Know where to go.</p>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_emergency_banner():
-    """Renders persistent emergency guidance at top of application."""
+    """911 and 988 as two tap-to-call buttons (they dial directly on a phone)."""
     st.markdown("""
     <div class="emergency-banner">
-        <div>
-            🚨 <strong>Medical Emergency?</strong> If experiencing a life-threatening emergency, call <strong>911</strong>. For free 24/7 mental health & suicide crisis support, dial <strong>988</strong>.
-        </div>
+        <a class="cz-em-red" href="tel:911">Emergency · 911</a>
+        <a class="cz-em-blue" href="tel:988">Crisis line · 988</a>
     </div>
     """, unsafe_allow_html=True)
 
 
 def render_header(active_page: str = "home"):
     """
-    Renders the unified top section across all pages:
-    1. CareAtZero Hero Banner
-    2. Navigation Bar (Home, Find, Detail, Saved, About)
-    3. Medical Emergency Warning Banner
+    Renders the shared parts of every page:
+    - Home: the logo bar and the 911 / 988 buttons
+    - Every page: the bottom tab bar (Home, Find, Help, About)
+    Other pages start with their own title, the way most phone apps do.
     """
-    render_brand_header()
-    render_top_nav(active_page)
-    render_emergency_banner()
+    if active_page == "home":
+        render_brand_header()
+    render_bottom_nav(active_page)
 
 
 def render_top_nav(active_page: str = "home"):
-    """
-    Renders top navigation bar across all pages with active state highlighting.
-    (Saved care navigation is hidden until user login system is implemented).
-    """
-    b1, b2, b3, b4 = st.columns(4)
-    with b1:
-        if st.button("🏠 Home", key="topnav_home", use_container_width=True, type="primary" if active_page == "home" else "secondary"):
-            if active_page != "home":
-                st.switch_page("app.py")
-
-    with b2:
-        if st.button("🔍 Find", key="topnav_find", use_container_width=True, type="primary" if active_page == "find_care" else "secondary"):
-            if active_page != "find_care":
-                st.switch_page("pages/1_🔍_Find_Free_Care.py")
-
-    with b3:
-        if st.button("📋 Detail", key="topnav_detail", use_container_width=True, type="primary" if active_page == "details" else "secondary"):
-            if active_page != "details":
-                st.switch_page("pages/2_📋_Care_Details.py")
-
-    with b4:
-        if st.button("ℹ️ About", key="topnav_about", use_container_width=True, type="primary" if active_page == "about" else "secondary"):
-            if active_page != "about":
-                st.switch_page("pages/4_ℹ️_About_&_Safety.py")
+    """Kept for compatibility: navigation now lives in the bottom tab bar."""
+    render_bottom_nav(active_page)
 
 
 def render_bottom_nav(active_page: str = "home"):
     """
-    Renders the fixed PWA bottom navigation bar on mobile viewports
-    with active tab styling.
-    (Saved care navigation is hidden until user login system is implemented).
+    Fixed tab bar at the bottom of the screen. The Detail screen belongs to Find,
+    so Find stays highlighted there. (Saved care is hidden until there are user accounts.)
     """
-    st.markdown("<div style='margin-bottom: 70px;'></div>", unsafe_allow_html=True)
-
-    b1, b2, b3, b4 = st.columns(4)
-    with b1:
-        if st.button("🏠\nHome", key="dock_home", use_container_width=True, type="primary" if active_page == "home" else "secondary"):
-            if active_page != "home":
-                st.switch_page("app.py")
-
-    with b2:
-        if st.button("🔍\nFind", key="dock_find", use_container_width=True, type="primary" if active_page == "find_care" else "secondary"):
-            if active_page != "find_care":
-                st.switch_page("pages/1_🔍_Find_Free_Care.py")
-
-    with b3:
-        if st.button("📋\nDetail", key="dock_detail", use_container_width=True, type="primary" if active_page == "details" else "secondary"):
-            if active_page != "details":
-                st.switch_page("pages/2_📋_Care_Details.py")
-
-    with b4:
-        if st.button("ℹ️\nAbout", key="dock_about", use_container_width=True, type="primary" if active_page == "about" else "secondary"):
-            if active_page != "about":
-                st.switch_page("pages/4_ℹ️_About_&_Safety.py")
+    active = "find_care" if active_page == "details" else active_page
+    st.markdown(f"<style>.st-key-nav_{active} button {{ color: var(--teal) !important; }}"
+                f".st-key-nav_{active} button p {{ font-weight: 800 !important; }}</style>",
+                unsafe_allow_html=True)
+    with st.container(key="cz_nav"):
+        with st.container(key="row_nav"):
+            cols = st.columns(len(NAV_TABS))
+            for col, (label, icon, page_key, page_file) in zip(cols, NAV_TABS):
+                with col:
+                    if st.button(label, icon=icon, key=f"nav_{page_key}", type="tertiary", use_container_width=True):
+                        if page_key != active_page:
+                            st.switch_page(page_file)

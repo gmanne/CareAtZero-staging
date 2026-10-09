@@ -1,5 +1,7 @@
 import datetime
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
+
+from utils.dates import today_str
 
 
 def calculate_care_access_score(
@@ -9,7 +11,7 @@ def calculate_care_access_score(
     timing_pref: str = "Flexible",
     user_insurance: str = "Uninsured",
     user_income_band: str = "Under $25k",
-    reference_date_str: str = "2026-09-16"
+    reference_date_str: Optional[str] = None
 ) -> Tuple[int, Dict[str, int], List[str]]:
     """
     Calculates transparent 100-point Care Access Score and provides
@@ -59,7 +61,7 @@ def calculate_care_access_score(
         event_start = record.get("date_start", "")
         if event_start:
             try:
-                ref_dt = datetime.date.fromisoformat(reference_date_str)
+                ref_dt = datetime.date.fromisoformat(reference_date_str or today_str())
                 evt_dt = datetime.date.fromisoformat(event_start)
                 days_until = (evt_dt - ref_dt).days
 

@@ -22,14 +22,10 @@ st.set_page_config(
 inject_custom_css()
 render_header("about")
 
-st.markdown("""
-<div style="margin-bottom: 20px;">
-    <h2 style="margin: 0; color: #1E293B;">ℹ️ About CareAtZero & Trust Standards</h2>
-    <p style="margin: 4px 0 0 0; color: #64748B;">Our mission, source verification process, transparent scoring formula, and safety commitments.</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="cz-title">About CareAtZero</div>'
+            '<div class="cz-sub">Our mission, sources, scoring and privacy.</div>', unsafe_allow_html=True)
 
-t1, t2, t3, t4 = st.tabs(["🎯 Mission & Overview", "📊 Transparent Scoring", "🛡️ Sources & Freshness", "🔒 Privacy & Emergency Safety"])
+t1, t2, t3, t4 = st.tabs(["Mission", "Scoring", "Sources", "Privacy"])
 
 with t1:
     st.subheader("Our Mission")
@@ -94,7 +90,7 @@ with t4:
     ### 🔒 Privacy Guarantee
     - **No Protected Health Information (PHI) Stored:** CareAtZero never asks for or stores your medical history, diagnosis, Social Security Number, or payment info.
     - **No User Account Required:** Search freely without creating a login.
-    - **Local Bookmarks Only:** Saved care options and personal notes are stored locally on your device.
+    - **Nothing Saved About You:** Searches are not stored. To keep a clinic's details, use **Download info** or copy the text on its detail screen. It stays on your phone, not on a server.
 
     ### ⚠️ Medical Advice & Emergency Disclaimer
     CareAtZero is an informational resource navigation directory and **does not provide medical diagnosis, treatment advice, or triage**. 

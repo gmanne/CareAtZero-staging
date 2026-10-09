@@ -15,6 +15,7 @@ from utils.calendar import generate_ics_calendar
 from utils.export import generate_shareable_referral_text
 from utils.geo import get_directions_url, geocode_location, haversine_distance, get_user_current_zip
 from utils.styles import inject_custom_css, render_header, LOGO_PATH
+from utils.dates import today_str
 
 
 st.set_page_config(
@@ -62,16 +63,12 @@ score, breakdown, reasons = calculate_care_access_score(
     record=record,
     service_needed="Medical",
     distance_miles=dist,
-    reference_date_str="2026-09-16"
+    reference_date_str=today_str()
 )
 
 # Back button & Breadcrumb
-col_back, col_dummy = st.columns([1, 4])
-with col_back:
-    if st.button("⬅️ Back to Results", use_container_width=True):
-        st.switch_page("pages/1_🔍_Find_Free_Care.py")
-
-st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+if st.button("Back to results", icon=":material/arrow_back:", type="tertiary"):
+    st.switch_page("pages/1_🔍_Find_Free_Care.py")
 
 # Title Header & Badges
 cost_badge = "<span class='badge-free'>100% FREE CARE ($0)</span>" if cost_class == "Free" else (
@@ -80,9 +77,9 @@ cost_badge = "<span class='badge-free'>100% FREE CARE ($0)</span>" if cost_class
 type_badge = "<span class='badge-event'>🚐 MOBILE / POP-UP EVENT</span>" if is_event else "<span class='badge-lowcost'>🏥 PERMANENT SAFETY-NET CLINIC</span>"
 
 st.markdown(f"""
-<div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 22px; margin-bottom: 20px;">
+<div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 16px; margin-bottom: 14px;">
     <div style="margin-bottom: 8px;">{cost_badge} {type_badge}</div>
-    <h1 style="margin: 4px 0 8px 0; color: #0F172A; font-size: 1.8rem;">{title}</h1>
+    <div class="cz-title" style="font-size: 24px; margin: 6px 0 6px 0;">{title}</div>
     <div style="font-size: 0.95rem; color: #475569; margin-bottom: 12px;">
         📍 <strong>{full_addr}</strong> • <span style="color:#2563EB; font-weight:600;">{dist} miles from {user_loc}</span>
     </div>
@@ -97,32 +94,44 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Main Action Buttons Toolbar
-act1, act2, act3 = st.columns(3)
+# Main actions: directions first, then call / calendar / take the info along
+maps_url = get_directions_url(full_addr, record.get("latitude"), record.get("longitude"))
+st.link_button("Get directions", maps_url, icon=":material/directions:", type="primary", use_container_width=True)
 
+act1, act2 = st.container(key="row_detail_actions").columns(2)
 with act1:
     phone_num = record.get("phone", "")
     if phone_num:
         clean_phone = phone_num.replace("(", "").replace(")", "").replace(" ", "").replace("-", "")
-        st.link_button(f"📞 Call {phone_num}", f"tel:{clean_phone}", type="primary", use_container_width=True)
+        st.link_button("Call", f"tel:{clean_phone}", icon=":material/call:", use_container_width=True)
     else:
-        st.button("📞 Phone Not Listed", disabled=True, use_container_width=True)
+        st.button("No phone listed", disabled=True, use_container_width=True)
 
 with act2:
-    maps_url = get_directions_url(full_addr, record.get("latitude"), record.get("longitude"))
-    st.link_button("🗺️ Get Directions", maps_url, use_container_width=True)
-
-with act3:
     # Add to Calendar (.ics download)
     ics_data = generate_ics_calendar(record)
     file_name = f"careatzero_{record.get('id')}.ics"
     st.download_button(
-        label="📅 Add to Calendar (.ics)",
+        label="Add to calendar",
         data=ics_data,
         file_name=file_name,
         mime="text/calendar",
+        icon=":material/calendar_add_on:",
         use_container_width=True
     )
+
+# Take the details along (no account needed): download or copy to text someone
+referral_text = generate_shareable_referral_text(record, score, reasons)
+st.download_button(
+    label="Download info",
+    data=referral_text,
+    file_name=f"referral_{record.get('id')}.txt",
+    mime="text/plain",
+    icon=":material/download:",
+    use_container_width=True
+)
+with st.expander("Copy this info to text or share"):
+    st.code(referral_text, language="text")
 
 st.markdown("---")
 
@@ -131,7 +140,7 @@ left_col, right_col = st.columns([1.6, 1.4])
 
 with left_col:
     # 1. What to Bring & Readiness Checklist
-    st.subheader("📄 What to Bring Checklist")
+    st.subheader("What to bring")
     st.markdown("*Review and prepare these items before your visit:*")
 
     docs = record.get("documents_required", [])
@@ -144,7 +153,7 @@ with left_col:
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
 
     # 2. Timing & Appointment Policy
-    st.subheader("⏰ Schedule & Admission Policy")
+    st.subheader("When to go")
     if is_event:
         st.markdown(f"""
         - **Event Dates:** {record.get('date_start')} to {record.get('date_end')}
@@ -162,19 +171,16 @@ with left_col:
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
 
     # 3. Services Offered
-    st.subheader("🩺 Services Offered")
+    st.subheader("Services")
     services = record.get("services", [])
-    s_cols = st.columns(min(len(services), 4) or 1)
-    for idx, s in enumerate(services):
-        with s_cols[idx % len(s_cols)]:
-            st.info(f"**{s}**")
+    st.markdown(" ".join(f"<span class='trust-pill'>{s}</span>" for s in services), unsafe_allow_html=True)
 
     if record.get("notes"):
         st.markdown(f"**Special Notes:** {record.get('notes')}")
 
 with right_col:
     # 4. Care Access Score Breakdown
-    st.subheader("🎯 Care Access Score Breakdown")
+    st.subheader("Care Access Score")
     st.markdown(f"Care Access Score: **{score}/100** *(Transparent 100-Point Model)*")
 
     # Score breakdown metric cards
@@ -188,10 +194,10 @@ with right_col:
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
 
     # 5. Verified Source & Freshness
-    st.subheader("🛡️ Source Provenance & Freshness")
+    st.subheader("Where this comes from")
     source_name = record.get("source_name", "Official Directory Feed")
     source_url = record.get("source_url", "https://careatzero.org")
-    last_checked = record.get("last_checked", "2026-09-16")
+    last_checked = record.get("last_checked") or "Not listed"
     source_status = record.get("source_status", "active")
 
     st.markdown(f"""
@@ -201,20 +207,6 @@ with right_col:
     - **Official Website:** [{record.get('website', source_url)}]({record.get('website', source_url)})
     """, unsafe_allow_html=True)
 
-    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-
-    # 6. Share / Referral Export for Social Workers and Navigators
-    st.subheader("📤 Share / Print Referral Summary")
-    referral_text = generate_shareable_referral_text(record, score, reasons)
-    st.download_button(
-        label="📄 Download Referral Summary (.txt)",
-        data=referral_text,
-        file_name=f"referral_{record.get('id')}.txt",
-        mime="text/plain",
-        use_container_width=True
-    )
-    with st.expander("👁️ Preview Shareable Text"):
-        st.code(referral_text, language="text")
 
 
 

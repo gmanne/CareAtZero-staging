@@ -1,13 +1,16 @@
 [theme]
-primaryColor = "#0D9488"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F8FAFC"
-textColor = "#0F172A"
+base = "light"
+primaryColor = "#0A7C74"
+backgroundColor = "#F4F7FA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0E2A5C"
 font = "sans serif"
 
 [client]
 showErrorDetails = false
 showSidebarNavigation = false
+# Hide Streamlit's developer menu so it looks like a normal phone app
+toolbarMode = "minimal"
 
 [server]
 headless = true

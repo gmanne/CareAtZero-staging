@@ -1,6 +1,7 @@
 import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from connectors.base import BaseCareConnector
+from utils.dates import today_str
 
 
 class MobileCareNetworkConnector(BaseCareConnector):
@@ -29,11 +30,11 @@ class MobileCareNetworkConnector(BaseCareConnector):
         except Exception:
             return True
 
-    def normalize_record(self, raw: Dict[str, Any], current_date_str: str = "2026-09-16") -> Dict[str, Any]:
+    def normalize_record(self, raw: Dict[str, Any], current_date_str: Optional[str] = None) -> Dict[str, Any]:
         """
         Normalizes mobile care events and computes active status.
         """
-        is_active = 1 if self.is_event_active(raw.get("date_end", raw.get("date_start", "")), current_date_str) else 0
+        is_active = 1 if self.is_event_active(raw.get("date_end", raw.get("date_start", "")), current_date_str or today_str()) else 0
 
         return {
             "id": raw.get("id"),

@@ -15,6 +15,7 @@ from database.db import get_all_sites, get_all_events, is_care_saved, toggle_sav
 from scoring.care_access_score import calculate_care_access_score
 from utils.geo import geocode_location, haversine_distance, get_directions_url, get_user_current_zip
 from utils.styles import inject_custom_css, render_header, LOGO_PATH
+from utils.dates import today_str
 
 
 st.set_page_config(
@@ -27,16 +28,13 @@ inject_custom_css()
 render_header("find_care")
 
 # Header
-st.markdown("""
-<div style="margin-bottom: 20px;">
-    <h2 style="margin: 0; color: #1E293B;">🔍 Find Free or Low-Cost Care</h2>
-    <p style="margin: 4px 0 0 0; color: #64748B;">Search verified free clinics, sliding-scale safety net centers, and upcoming mobile pop-ups.</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="cz-title">Find care</div>'
+            '<div class="cz-sub">Free clinics, sliding-scale centers and upcoming pop-ups.</div>',
+            unsafe_allow_html=True)
 
 # Retrieve preset filters from session state if coming from Home page
 user_detected_zip = get_user_current_zip()
-default_service = st.session_state.get("selected_service", "Dental")
+default_service = st.session_state.get("selected_service", "Medical")
 saved_loc = st.session_state.get("search_loc")
 if saved_loc and str(saved_loc).strip():
     default_loc = str(saved_loc).strip()
@@ -47,17 +45,17 @@ default_timing = st.session_state.get("search_timing", "This Week")
 
 # --- FILTER SECTION ---
 with st.container():
-    st.markdown("#### 1. Search Criteria")
     col1, col2, col3 = st.columns([1.5, 1.2, 1.2])
 
     with col1:
-        service_options = ["Dental", "Medical", "Vision", "Behavioral Health"]
+        service_options = ["Medical", "Dental", "Vision", "Behavioral Health"]
         s_idx = service_options.index(default_service) if default_service in service_options else 0
-        service_needed = st.selectbox("🩺 **Service Needed** *", service_options, index=s_idx)
+        service_needed = st.selectbox("Type of care", service_options, index=s_idx,
+                                      format_func=lambda s: "Mental health" if s == "Behavioral Health" else s)
 
     with col2:
         location_input = st.text_input(
-            "📍 **Your Location (ZIP or City)** *",
+            "Your Location (ZIP code or city)",
             value=default_loc,
             key="find_care_loc_input",
             help=f"Defaulted to your location ({user_detected_zip}). Enter any ZIP code or city."
@@ -68,9 +66,10 @@ with st.container():
     with col3:
         timing_options = ["This Week", "Today", "Flexible (Upcoming)"]
         t_idx = timing_options.index(default_timing) if default_timing in timing_options else 0
-        timing_pref = st.selectbox("⏱️ **When Care is Needed**", timing_options, index=t_idx)
+        timing_pref = st.selectbox("When do you need care?", timing_options, index=t_idx,
+                                   format_func=lambda t: "Any time" if t.startswith("Flexible") else t)
 
-    with st.expander("⚙️ **Optional Filters & Eligibility Tuning (Click to expand)**", expanded=False):
+    with st.expander("More filters: age, income, cost, distance", expanded=False):
         exp1, exp2, exp3, exp4 = st.columns(4)
         with exp1:
             age_group = st.selectbox("👤 **Age Group**", ["Adults (18-64)", "Children & Youth (0-17)", "Seniors (65+)", "All Ages"])
@@ -92,12 +91,12 @@ user_lat, user_lon, loc_label = geocode_location(location_input)
 
 # Fetch data from SQLite
 sites = get_all_sites()
-events = get_all_events(include_expired=False, current_date_str="2026-09-16")
+current_date_ref = today_str()
+events = get_all_events(include_expired=False, current_date_str=current_date_ref)
 all_records = sites + events
 
 # Filter and score records
 scored_records = []
-current_date_ref = "2026-09-16"
 
 for rec in all_records:
     # 1. Service Filter Check
@@ -152,7 +151,7 @@ st.markdown("---")
 # Results Header
 res_col1, res_col2 = st.columns([3, 1])
 with res_col1:
-    st.markdown(f"### Results for **{service_needed} Care** near **{loc_label}** ({len(scored_records)} options found)")
+    st.markdown(f"**{len(scored_records)} option(s)** · {service_needed} care near {loc_label}")
 with res_col2:
     view_mode = st.radio("View as:", ["📋 List View", "🗺️ Map View"], horizontal=True, label_visibility="collapsed")
 
@@ -260,11 +259,12 @@ else:
         """
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # Action Buttons Row
-        btn_c1, btn_c2, btn_c3 = st.columns([1.5, 1, 1])
+        # Action Buttons Row (kept side by side on phones)
+        row = st.container(key=f"row_res_{idx}")
+        btn_c1, btn_c2, btn_c3 = row.columns(3)
 
         with btn_c1:
-            if st.button(f"📋 View Full Details", key=f"btn_det_{rec.get('id')}_{idx}", type="primary", use_container_width=True):
+            if st.button("Details", key=f"btn_det_{rec.get('id')}_{idx}", type="primary", use_container_width=True):
                 st.session_state["selected_care_id"] = rec.get("id")
                 st.session_state["selected_care_type"] = rec.get("record_type")
                 st.switch_page("pages/2_📋_Care_Details.py")
@@ -273,14 +273,14 @@ else:
             phone_num = rec.get("phone", "")
             if phone_num:
                 clean_phone = phone_num.replace("(", "").replace(")", "").replace(" ", "").replace("-", "")
-                st.link_button(f"📞 Call", f"tel:{clean_phone}", use_container_width=True)
+                st.link_button("Call", f"tel:{clean_phone}", icon=":material/call:", use_container_width=True)
             else:
-                st.button("📞 Call", disabled=True, key=f"call_dis_{idx}", use_container_width=True)
+                st.button("Call", icon=":material/call:", disabled=True, key=f"call_dis_{idx}", use_container_width=True)
 
         with btn_c3:
             addr = f"{rec.get('address')}, {rec.get('city')}, NC"
             maps_url = get_directions_url(addr, rec.get("latitude"), rec.get("longitude"))
-            st.link_button(f"🗺️ Directions", maps_url, use_container_width=True)
+            st.link_button("Directions", maps_url, use_container_width=True)
 
         st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
