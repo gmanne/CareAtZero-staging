@@ -6,7 +6,7 @@ CareAtZero helps people who don't have health insurance find **free or low-cost*
 
 Try it: **https://careatzero.streamlit.app**
 
-Made by Subin Kalarikkal for the 2026 Congressional App Challenge.
+Made by Arjun Manne for the 2026 Congressional App Challenge.
 
 ---
 
@@ -100,7 +100,7 @@ python -m pytest -q
 - **GitHub** and **Streamlit Community Cloud**: to store the code and put the app online
 - **GitHub Pages**: the "install on your phone" page
 
-**AI tools:** I used AI coding assistants (Google Antigravity and Anthropic's Claude) to help with parts of this project: the phone-style screen design, connecting the live data sources, finding and fixing bugs, and writing tests. I planned the app, made the design decisions, and tested everything myself. *(Edit this paragraph so it matches exactly how you used AI. The contest rules say all AI use must be disclosed.)*
+**AI tools:** I used AI coding assistant Anthropic's Claude to help with parts of this project: the phone-style screen design, connecting the live data sources, finding and fixing bugs, and writing tests. I planned the app, made the design decisions, and tested everything myself.
 
 ## Safety
 
