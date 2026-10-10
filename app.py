@@ -95,10 +95,15 @@ location_desc = f"{city_label} ({user_detected_zip})" if city_label else user_de
 
 timing_labels = {"Today": "Today", "This Week": "This week", "Flexible (Upcoming)": "Any time"}
 
+# The box's text lives in session state, so a location found after the screen first
+# appears (the browser's answer arrives a moment later) really shows up in the box.
+# An empty box is filled in; anything the user typed is left alone.
+if default_loc and not str(st.session_state.get("home_search_loc_input") or "").strip():
+    st.session_state["home_search_loc_input"] = default_loc
+
 with st.form(key="home_quick_search_form", clear_on_submit=False, border=False):
     quick_loc = st.text_input(
         "Where are you? (ZIP code or city)",
-        value=default_loc,
         placeholder="Enter your ZIP code",
         help=(f"Detected location: {location_desc}. You can type any ZIP code or city."
               if user_detected_zip else "Enter a ZIP code or city anywhere in the U.S."),
@@ -231,8 +236,12 @@ st.markdown("Pop-up clinics give **free care for a day or two**, usually with no
             "*Arrive early for a ticket.*")
 
 if ram_status is not None and ram_status.saved_copy_from:
-    st.caption(f"RAM's live calendar couldn't be reached just now, so these come from a saved copy of it "
-               f"(saved {format_checked(ram_status.saved_copy_from)}). "
+    if "web page instead" in (ram_status.error or ""):
+        why = "RAM's website doesn't allow automatic downloads from our server"
+    else:
+        why = "RAM's live calendar couldn't be reached just now"
+    st.caption(f"{why}, so these come from a copy of RAM's calendar saved "
+               f"{format_checked(ram_status.saved_copy_from)}. "
                "Confirm on [ramusa.org/schedule](https://www.ramusa.org/schedule/) before you go.")
 
 if not clean_loc:

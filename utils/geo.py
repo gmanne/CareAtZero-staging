@@ -179,7 +179,7 @@ def inject_client_geo_detector():
             if state.get("search_loc") != browser_loc["zip"]:
                 state["search_loc"] = browser_loc["zip"]
                 state["search_loc_auto"] = True
-                state.pop("home_search_loc_input", None)  # let the box show the new ZIP
+                state["home_search_loc_input"] = browser_loc["zip"]  # show the new ZIP in the box
                 st.rerun()
     except Exception as e:
         if type(e).__name__ in ("RerunException", "StopException"):

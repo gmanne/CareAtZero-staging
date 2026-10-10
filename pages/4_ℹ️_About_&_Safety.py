@@ -90,9 +90,9 @@ with t3:
             "Source": f"[{src.name}]({src.url})",
             "Provides": src.provides,
             "Status": (f"Live · {src.count} records" if src.ok else
-                       f"Live site unreachable · showing saved copy from {format_checked(src.saved_copy_from)} ({src.count} records)"
+                       f"Live site unavailable · saved copy ({src.count} records)"
                        if src.saved_copy_from else "Unavailable right now"),
-            "Checked": format_checked(src.checked),
+            "Checked": format_checked(src.checked or src.saved_copy_from),
         })
     st.markdown("| Source | Provides | Status | Checked (" + timezone_label() + ") |\n|---|---|---|---|\n" +
                 "\n".join(f"| {r['Source']} | {r['Provides']} | {r['Status']} | {r['Checked']} |" for r in rows))
