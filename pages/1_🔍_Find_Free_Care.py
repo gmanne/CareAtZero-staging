@@ -52,16 +52,19 @@ INCOME_OPTIONS = ["Under $25,000 / $0", "$25,000 - $45,000", "$45,000+", "Prefer
 default_income = st.session_state.get("income_band", INCOME_OPTIONS[0])
 
 # --- FILTER SECTION ---
-with st.container():
-    col1, col2, col3 = st.columns([1.5, 1.2, 1.2])
+FILTER_KEYS = ("find_income", "find_cost", "find_dist", "find_sort")
+COST_OPTIONS = ["All Low-Cost & Free", "Free Only ($0 Fee)", "Free & Very Low Cost", "Sliding Scale Included"]
+SORT_OPTIONS = ["Care Access Score (Best realistic match)", "Closest Distance"]
+if st.session_state.pop("reset_filters", False):  # "Reset filters" was tapped: back to the defaults
+    for k in FILTER_KEYS:
+        st.session_state.pop(k, None)
+    st.session_state["income_band"] = INCOME_OPTIONS[0]
+    default_income = INCOME_OPTIONS[0]
 
-    with col1:
-        service_options = ["Medical", "Dental", "Vision", "Behavioral Health"]
-        s_idx = service_options.index(default_service) if default_service in service_options else 0
-        service_needed = st.selectbox("Type of care", service_options, index=s_idx,
-                                      format_func=lambda s: "Mental health" if s == "Behavioral Health" else s)
-
-    with col2:
+# Where: ZIP code box with its own Search button (people expect a button after typing)
+with st.container(key="row_find_loc"):
+    loc_col, btn_col = st.columns([3, 1], vertical_alignment="bottom")
+    with loc_col:
         location_input = st.text_input(
             "Your Location (ZIP code or city)",
             value=default_loc,
@@ -70,9 +73,21 @@ with st.container():
             help=(f"Defaulted to your location ({user_detected_zip}). Enter any ZIP code or city."
                   if user_detected_zip else "Enter a ZIP code or city anywhere in the U.S.")
         )
-        if location_input and location_input.strip() != st.session_state.get("search_loc"):
-            st.session_state["search_loc"] = location_input.strip()
-            st.session_state["search_loc_auto"] = False  # typed by the user
+    with btn_col:
+        search_clicked = st.button("Search", icon=":material/search:", type="primary",
+                                   key="find_search_btn", width="stretch")
+if location_input and location_input.strip() != st.session_state.get("search_loc"):
+    st.session_state["search_loc"] = location_input.strip()
+    st.session_state["search_loc_auto"] = False  # typed by the user
+
+with st.container():
+    col1, col3 = st.columns(2)
+
+    with col1:
+        service_options = ["Medical", "Dental", "Vision", "Behavioral Health"]
+        s_idx = service_options.index(default_service) if default_service in service_options else 0
+        service_needed = st.selectbox("Type of care", service_options, index=s_idx,
+                                      format_func=lambda s: "Mental health" if s == "Behavioral Health" else s)
 
     with col3:
         timing_options = ["This Week", "Today", "Flexible (Upcoming)"]
@@ -83,17 +98,21 @@ with st.container():
     with st.expander("More filters: income, cost, distance", expanded=False):
         exp1, exp2 = st.columns(2)
         with exp1:
-            income_band = st.selectbox("💵 **Household Income**", INCOME_OPTIONS,
+            income_band = st.selectbox("💵 **Household Income**", INCOME_OPTIONS, key="find_income",
                                        index=INCOME_OPTIONS.index(default_income) if default_income in INCOME_OPTIONS else 0,
                                        help="Used only to estimate sliding-scale fee tier. Never saved.")
         with exp2:
-            cost_filter = st.selectbox("🏷️ **Cost Preference**", ["All Low-Cost & Free", "Free Only ($0 Fee)", "Free & Very Low Cost", "Sliding Scale Included"])
+            cost_filter = st.selectbox("🏷️ **Cost Preference**", COST_OPTIONS, key="find_cost")
 
         col_dist, col_sort = st.columns(2)
         with col_dist:
-            max_dist = st.slider("🚗 **Maximum Distance (miles)**", min_value=5, max_value=60, value=35, step=5)
+            max_dist = st.slider("🚗 **Maximum Distance (miles)**", min_value=5, max_value=60, value=35, step=5,
+                                 key="find_dist")
         with col_sort:
-            sort_by = st.radio("📊 **Sort Results By**", ["Care Access Score (Best realistic match)", "Closest Distance"], horizontal=True)
+            sort_by = st.radio("📊 **Sort Results By**", SORT_OPTIONS, horizontal=True, key="find_sort")
+        if st.button("Reset filters", icon=":material/restart_alt:", type="tertiary", key="find_reset_btn"):
+            st.session_state["reset_filters"] = True
+            st.rerun()
 
 # Remember the choices, so Details scores the same way and "Back to results" keeps them
 st.session_state["selected_service"] = service_needed
@@ -206,10 +225,25 @@ else:
 
 st.markdown("---")
 
+# Tell the user the list changed (filters update the results right away)
+criteria = (service_needed, location_input.strip(), timing_pref, income_band, cost_filter, max_dist, sort_by)
+previous = st.session_state.get("find_last_criteria")
+st.session_state["find_last_criteria"] = criteria
+if search_clicked or (previous is not None and previous != criteria):
+    care_name = "Mental health" if service_needed == "Behavioral Health" else service_needed
+    st.toast(f"Results updated: {len(scored_records)} {care_name} option"
+             f"{'s' if len(scored_records) != 1 else ''} near {loc_label}", icon=":material/check_circle:")
+
 # Results Header
 res_col1, res_col2 = st.columns([3, 1])
 with res_col1:
-    st.markdown(f"**{len(scored_records)} option(s)** · {service_needed} care near {escape(loc_label)}")
+    # Say exactly what the list is based on, so a change is easy to see
+    care_label = "Mental health" if service_needed == "Behavioral Health" else service_needed
+    when_label = {"Today": "Today", "This Week": "This week"}.get(timing_pref, "Any time")
+    cost_label = {"Free Only ($0 Fee)": " · Free only", "Free & Very Low Cost": " · Free & very low cost"}.get(cost_filter, "")
+    count = len(scored_records)
+    st.markdown(f"**{count} {care_label} option{'s' if count != 1 else ''}** within {max_dist} mi of "
+                f"{escape(loc_label)} · {when_label}{cost_label}")
 with res_col2:
     view_mode = st.radio("View as:", ["📋 List View", "🗺️ Map View"], horizontal=True, label_visibility="collapsed")
 
