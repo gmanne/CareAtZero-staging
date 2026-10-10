@@ -79,3 +79,10 @@ def test_when_do_you_need_care_filters_events(monkeypatch):
     assert "Soon Clinic" in text(at) and "Later Clinic" not in text(at)
     at = run_page("find", search_loc="27601", selected_service="Dental", search_timing="Flexible (Upcoming)")
     assert "Later Clinic" in text(at)
+
+
+def test_about_page_has_no_wide_tables_and_no_math_dollars():
+    at = run_page("about", search_loc="27601")
+    text = " ".join(m.value for m in at.markdown)
+    assert "| Match Signal |" not in text and "| Source | Provides |" not in text  # cards, not tables
+    assert "&#36;0" in text and "35 pts" in text

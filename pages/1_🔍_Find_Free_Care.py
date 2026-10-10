@@ -74,8 +74,8 @@ with st.container(key="row_find_loc"):
                   if user_detected_zip else "Enter a ZIP code or city anywhere in the U.S.")
         )
     with btn_col:
-        search_clicked = st.button("Search", icon=":material/search:", type="primary",
-                                   key="find_search_btn", width="stretch")
+        # Tapping Search applies the typed ZIP and refreshes the results below
+        st.button("Search", icon=":material/search:", type="primary", key="find_search_btn", width="stretch")
 if location_input and location_input.strip() != st.session_state.get("search_loc"):
     st.session_state["search_loc"] = location_input.strip()
     st.session_state["search_loc_auto"] = False  # typed by the user
@@ -147,8 +147,8 @@ else:
     saved = [s.name for s in live.statuses if not s.ok and s.saved_copy_from]
     down = [s.name for s in live.statuses if not s.ok and not s.saved_copy_from]
     if saved:
-        st.caption("Couldn't reach " + ", ".join(saved) + " just now, so a saved copy is used "
-                   "(marked on each result). Call ahead to confirm.")
+        st.caption("Using a saved copy for " + ", ".join(saved) + " because the live site isn't available "
+                   "to the app (marked on each result). Call ahead to confirm.")
     if down:
         st.caption("Temporarily unavailable, so not included: " + ", ".join(down) + ". Try again in a few minutes.")
 
@@ -224,15 +224,6 @@ else:
     scored_records.sort(key=lambda x: (x["score"], -x["distance"]), reverse=True)
 
 st.markdown("---")
-
-# Tell the user the list changed (filters update the results right away)
-criteria = (service_needed, location_input.strip(), timing_pref, income_band, cost_filter, max_dist, sort_by)
-previous = st.session_state.get("find_last_criteria")
-st.session_state["find_last_criteria"] = criteria
-if search_clicked or (previous is not None and previous != criteria):
-    care_name = "Mental health" if service_needed == "Behavioral Health" else service_needed
-    st.toast(f"Results updated: {len(scored_records)} {care_name} option"
-             f"{'s' if len(scored_records) != 1 else ''} near {loc_label}", icon=":material/check_circle:")
 
 # Results Header
 res_col1, res_col2 = st.columns([3, 1])
@@ -357,7 +348,8 @@ else:
             </div>
         </div>
         """
-        st.markdown(card_html, unsafe_allow_html=True)
+        # "&#36;" is a dollar sign: a plain "$...$" pair would be shown as a math formula
+        st.markdown(card_html.replace("$", "&#36;"), unsafe_allow_html=True)
 
         # Action Buttons Row (kept side by side on phones)
         row = st.container(key=f"row_res_{idx}")

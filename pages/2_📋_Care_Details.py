@@ -94,8 +94,8 @@ if st.button("Back to results", icon=":material/arrow_back:", type="tertiary"):
 
 # Title Header & Badges
 cost_badge = {
-    "Free": "<span class='badge-free'>100% FREE CARE ($0)</span>",
-    "Very Low Cost": "<span class='badge-lowcost'>VERY LOW COST ($5-$25)</span>",
+    "Free": "<span class='badge-free'>100% FREE CARE (&#36;0)</span>",
+    "Very Low Cost": "<span class='badge-lowcost'>VERY LOW COST (&#36;5-&#36;25)</span>",
     "Sliding Scale": "<span class='badge-sliding'>SLIDING SCALE DISCOUNT</span>",
 }.get(cost_class, "<span class='badge-sliding'>COST: ASK THE CLINIC</span>")
 type_badge = "<span class='badge-event'>🚐 MOBILE / POP-UP EVENT</span>" if is_event else "<span class='badge-lowcost'>🏥 PERMANENT SAFETY-NET CLINIC</span>"
@@ -155,7 +155,7 @@ st.download_button(
     width="stretch"
 )
 with st.expander("Copy this info to text or share"):
-    st.code(referral_text, language="text")
+    st.code(referral_text, language="text", wrap_lines=True)  # wraps on phones instead of scrolling sideways
 
 st.markdown("---")
 
@@ -214,7 +214,7 @@ with right_col:
 
     st.markdown("**Why this matches:**")
     for r in reasons:
-        st.markdown(f"- {r}")
+        st.markdown("- " + r.replace("$", "\\$"))  # "\$" keeps "$0-$15" from turning into a math formula
 
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
 

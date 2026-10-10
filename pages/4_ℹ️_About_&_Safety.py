@@ -53,18 +53,30 @@ with t2:
     Rather than relying on opaque AI or simple distance sorting, CareAtZero uses an open, transparent **100-Point Care Access Scoring Model**:
     """)
 
-    st.markdown("""
-    | Match Signal | Weight | How It Is Evaluated |
-    | :--- | :--- | :--- |
-    | **Cost Fit** | **35%** | **Free ($0 fee)** receives maximum 35 pts; **Very Low Cost ($5-$25)** receives 25 pts; **Sliding Scale** receives 18-20 pts based on income band fit. |
-    | **Time to Care / Availability** | **25%** | Pop-up event happening **Today (25 pts)** or **This Week (22-24 pts)**; permanent clinics with daily walk-in access receive 20-24 pts. |
-    | **Service Match** | **15%** | Exact match for requested service (Dental, Medical, Vision, Behavioral Health) receives 15 pts. |
-    | **Eligibility Confidence** | **10%** | Barrier-free clinics with no ID/income document barriers receive 10 pts; standard sliding scale verification receives 8 pts. |
-    | **Distance / Transit Burden** | **10%** | Proximity to user: under 5 mi (10 pts), 5-12 mi (8 pts), 12-25 mi (6 pts), 25-50 mi (4 pts), over 50 mi (2 pts). |
-    | **Data Freshness & Completeness** | **5%** | Checked from an official source in the last 60 days (5 pts); older or unverified records get fewer points. |
-    """)
+    # One card per signal (not a table), so it fits a phone screen without sideways scrolling.
+    # "&#36;" is a dollar sign: a plain "$...$" pair would be shown as a math formula.
+    signals = [
+        ("Cost fit", 35, "<b>Free (&#36;0)</b>: 35 points. <b>Very low cost (&#36;5–&#36;25)</b>: 25. "
+                         "<b>Sliding scale</b>: 18–20, depending on income."),
+        ("How soon you can go", 25, "Pop-up event <b>today</b>: 25. <b>This week</b>: 22–24. "
+                                    "Walk-in clinics: 20–24. Same-day appointments: 18."),
+        ("Right type of care", 15, "An exact match for the care you picked (medical, dental, vision or mental health): 15."),
+        ("Easy to get in", 10, "No ID or income papers needed: 10. Open to all uninsured people: 9. "
+                               "Income check for the sliding scale: 8."),
+        ("Distance", 10, "Under 5 miles: 10. 5–12 mi: 8. 12–25 mi: 6. 25–50 mi: 4. Over 50 mi: 2."),
+        ("Fresh information", 5, "Checked from an official source in the last 60 days: 5. Older: fewer points."),
+    ]
+    for name, points, how in signals:
+        st.markdown(f"""
+<div class="care-card" style="padding:14px 16px; margin-bottom:10px;">
+  <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline;">
+    <strong style="color:#0E2A5C; font-size:1.02rem;">{name}</strong>
+    <span class="score-badge" style="white-space:nowrap;">{points} pts</span>
+  </div>
+  <div class="card-meta" style="margin-top:6px;">{how}</div>
+</div>""", unsafe_allow_html=True)
 
-    st.info("💡 **Strict Business Rule:** A provider is **never labeled Free** unless the underlying source explicitly verifies $0 patient charge for that service.")
+    st.info("💡 **Strict Business Rule:** A provider is **never labeled Free** unless the underlying source explicitly verifies a \\$0 patient charge for that service.")
 
 with t3:
     st.subheader("Live data sources")
@@ -84,18 +96,24 @@ with t3:
         st.caption("SAMHSA's mental health listings are searched around your location, "
                    "so their status appears after you search a ZIP code.")
 
-    rows = []
+    # One card per source (not a table), so it fits a phone screen without sideways scrolling
+    zone = timezone_label()
     for src in live.statuses:
-        rows.append({
-            "Source": f"[{src.name}]({src.url})",
-            "Provides": src.provides,
-            "Status": (f"Live · {src.count} records" if src.ok else
-                       f"Live site unavailable · saved copy ({src.count} records)"
-                       if src.saved_copy_from else "Unavailable right now"),
-            "Checked": format_checked(src.checked or src.saved_copy_from),
-        })
-    st.markdown("| Source | Provides | Status | Checked (" + timezone_label() + ") |\n|---|---|---|---|\n" +
-                "\n".join(f"| {r['Source']} | {r['Provides']} | {r['Status']} | {r['Checked']} |" for r in rows))
+        if src.ok:
+            status, color = f"Live · {src.count} records", "#0A7C74"
+        elif src.saved_copy_from:
+            status, color = f"Saved copy · {src.count} records (live site unavailable)", "#B45309"
+        else:
+            status, color = "Unavailable right now", "#B45309"
+        when = src.checked or src.saved_copy_from
+        checked = f"{format_checked(when)} ({zone})" if when else "not yet"
+        st.markdown(f"""
+<div class="care-card" style="padding:14px 16px; margin-bottom:10px;">
+  <a href="{src.url}" target="_blank" style="font-weight:700; color:#0E2A5C; font-size:1.02rem;">{src.name}</a>
+  <div class="card-meta" style="margin-top:4px;">{src.provides}</div>
+  <div class="card-meta"><span style="color:{color}; font-weight:600;">{status}</span></div>
+  <div class="source-meta">Checked: {checked}</div>
+</div>""", unsafe_allow_html=True)
 
     st.markdown("""
 **Also used**
