@@ -24,3 +24,6 @@ htmlcov/
 # System
 .DS_Store
 Thumbs.db
+
+# Raw downloads saved by tools/check_live_sources.py (for local testing only)
+tools/samples/

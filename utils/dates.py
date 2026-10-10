@@ -43,3 +43,19 @@ def format_checked_date(value) -> str:
         return datetime.date.fromisoformat(str(value)[:10]).strftime("%b %d, %Y").replace(" 0", " ")
     except (TypeError, ValueError):
         return str(value) if value else "date not listed"
+
+
+def format_event_dates(start, end=None) -> str:
+    """'2027-04-24', '2027-04-25' -> 'Apr 24–25, 2027'; one day -> 'Apr 24, 2027'."""
+    try:
+        d1 = datetime.date.fromisoformat(str(start)[:10])
+        d2 = datetime.date.fromisoformat(str(end)[:10]) if end else d1
+    except (TypeError, ValueError):
+        return str(start or "Date to be announced")
+    if d2 <= d1:
+        return f"{d1:%b} {d1.day}, {d1.year}"
+    if (d1.year, d1.month) == (d2.year, d2.month):
+        return f"{d1:%b} {d1.day}–{d2.day}, {d1.year}"
+    if d1.year == d2.year:
+        return f"{d1:%b} {d1.day} – {d2:%b} {d2.day}, {d1.year}"
+    return f"{d1:%b} {d1.day}, {d1.year} – {d2:%b} {d2.day}, {d2.year}"

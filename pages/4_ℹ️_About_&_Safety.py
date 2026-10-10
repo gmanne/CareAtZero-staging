@@ -9,7 +9,9 @@ if not sys.path or sys.path[0] != PROJECT_ROOT:
         sys.path.remove(PROJECT_ROOT)
     sys.path.insert(0, PROJECT_ROOT)
 
-from database.db import get_connection
+from live.sources import load_live_data
+from utils.dates import format_checked_date
+from utils.geo import geocode_location
 from utils.styles import inject_custom_css, render_header, LOGO_PATH
 
 
@@ -64,25 +66,38 @@ with t2:
     st.info("💡 **Strict Business Rule:** A provider is **never labeled Free** unless the underlying source explicitly verifies $0 patient charge for that service.")
 
 with t3:
-    st.subheader("Official Data Sources & Freshness")
-    st.markdown("All clinic records and pop-up events in CareAtZero are linked to verified public sources and updated regularly:")
+    st.subheader("Live data sources")
+    st.markdown("Every search uses current records from these official public sources, "
+                "fetched automatically and refreshed every few hours:")
 
-    # Read sources from SQLite
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, source_type, source_url, last_checked, status FROM sources")
-        rows = cursor.fetchall()
+    search_loc = st.session_state.get("search_loc") or "27601"
+    a_lat, a_lon, _ = geocode_location(search_loc)
+    with st.spinner("Checking the live sources..."):
+        live = load_live_data(a_lat, a_lon)
 
-    src_list = []
-    for r in rows:
-        src_list.append({
-            "Source Name": r["name"],
-            "Type": r["source_type"],
-            "URL / Directory": r["source_url"],
-            "Last Checked": r["last_checked"],
-            "Status": r["status"].upper()
+    rows = []
+    for src in live.statuses:
+        rows.append({
+            "Source": f"[{src.name}]({src.url})",
+            "Provides": src.provides,
+            "Status": f"Live · {src.count} records" if src.ok else "Unavailable right now",
+            "Checked": format_checked_date(src.checked),
         })
-    st.table(src_list)
+    st.markdown("| Source | Provides | Status | Checked |\n|---|---|---|---|\n" +
+                "\n".join(f"| {r['Source']} | {r['Provides']} | {r['Status']} | {r['Checked']} |" for r in rows))
+
+    st.markdown("""
+**Also used**
+- **U.S. Census Bureau ZIP code list**, to place any U.S. ZIP code on the map.
+- **Community pop-up events** (mobile dental buses, county health vans and similar) that don't publish
+  a schedule online. These are entered by hand from the organizer, marked *manually verified*, and shown
+  only until their end date.
+
+**If a source is down**, the app leaves it out and says so, instead of guessing. If every clinic source
+is down, it shows a saved copy of the CareAtZero directory (last verified September 2026), clearly labeled.
+    """)
+    if live.using_saved_directory:
+        st.warning("Right now the live clinic sources can't be reached, so searches use the saved directory.")
 
 with t4:
     st.subheader("Privacy, Safety & Medical Disclaimers")

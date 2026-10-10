@@ -12,7 +12,8 @@ if not sys.path or sys.path[0] != PROJECT_ROOT:
 from database.db import get_all_events, init_db, DB_PATH
 from data.seed_data import seed_database
 from utils.styles import inject_custom_css, render_header, render_emergency_banner, LOGO_PATH
-from utils.dates import today_str, format_checked_date
+from utils.dates import today_str, format_checked_date, format_event_dates
+from live.sources import load_live_data
 from utils.geo import (
     NC_ZIP_COORDINATES, get_user_current_zip, detect_user_location,
     set_simulated_location, US_SIMULATION_PRESETS, geocode_location, haversine_distance,
@@ -156,50 +157,53 @@ if st.query_params.get("test_geo") == "true":
 
 st.markdown("---")
 
-events = get_all_events(include_expired=False, current_date_str=today_str())
+# Live pop-up events: RAM's calendar + hand-verified community events, nearest date first
+POPUP_RADIUS_MILES = 150
+clean_loc = str(quick_loc).strip() or default_loc
+home_lat, home_lon, home_label = geocode_location(clean_loc)
+with st.spinner("Checking upcoming free pop-up clinics..."):
+    live_events = load_live_data(home_lat, home_lon, include_sites=False)
+ram_status = next((s for s in live_events.statuses if s.key == "ram"), None)
 
-# Highlight: Upcoming Mobile Care & RAM Free Clinics
-st.subheader("Upcoming free pop-up clinics")
-st.markdown("Pop-up clinics provide **100% free episodic care** without insurance, ID, or income documentation. *Arrive early for tickets.*")
-
-# Filter events: ONLY show clinics available directly in that zip code
-clean_loc = str(quick_loc).strip()
 matching_events = []
-for evt in events:
-    evt_zip = str(evt.get("zip_code", "")).strip()
-    evt_city = str(evt.get("city", "")).strip().lower()
-    
-    # Exact match on ZIP code
-    if clean_loc and clean_loc == evt_zip:
-        matching_events.append(evt)
-    # Or match if user typed city name (e.g. "Raleigh", "Durham", "Chapel Hill")
-    elif clean_loc and not clean_loc.isdigit() and clean_loc.lower() in evt_city:
-        matching_events.append(evt)
+for evt in live_events.events:
+    if evt.get("latitude") is None or evt.get("longitude") is None:
+        continue
+    miles = haversine_distance(home_lat, home_lon, evt["latitude"], evt["longitude"])
+    if miles <= POPUP_RADIUS_MILES:
+        matching_events.append((evt, miles))
+
+st.subheader("Upcoming free pop-up clinics")
+st.markdown("Pop-up clinics give **free care for a day or two**, usually with no insurance, ID or income proof needed. "
+            "*Arrive early for a ticket.*")
 
 if matching_events:
-    st.markdown(f"**Clinics available in ZIP {clean_loc} ({len(matching_events)} found):**")
-    ev_cols = st.columns(min(len(matching_events), 3))
-    for idx, evt in enumerate(matching_events[:3]):
-        with ev_cols[idx]:
-            evt_zip = evt.get('zip_code', '')
-            badge_html = f"<span class='badge-event'>📅 {evt.get('date_start')}</span> <span class='badge-free'>FREE</span>"
-            st.markdown(f"""
-            <div class="care-card" style="height: 100%;">
-                <div style="margin-bottom: 8px;">{badge_html}</div>
-                <h4 style="margin: 4px 0; color: #1E293B;">{evt.get('title')}</h4>
-                <div class="card-meta">📍 {evt.get('location_name')} ({evt.get('city')}, NC {evt_zip})</div>
-                <div class="card-meta">🩺 <strong>Services:</strong> {', '.join(evt.get('services', []))}</div>
-                <div class="card-meta">⏰ {evt.get('time_details')}</div>
-                <div class="source-meta">Verified via {evt.get('organizer_name')} • Source checked {format_checked_date(evt.get('last_checked'))}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button(f"View Event Details", key=f"btn_evt_home_{evt.get('id')}", use_container_width=True):
-                st.session_state["selected_care_id"] = evt.get("id")
-                st.session_state["selected_care_type"] = "event"
-                st.switch_page("pages/2_📋_Care_Details.py")
+    st.markdown(f"**{len(matching_events)} within {POPUP_RADIUS_MILES} miles of {home_label}:**")
+    for evt, miles in matching_events[:3]:
+        evt_zip = evt.get("zip_code", "")
+        when = format_event_dates(evt.get("date_start"), evt.get("date_end"))
+        cost_badge = "<span class='badge-free'>FREE</span>" if evt.get("cost_class") == "Free" else ""
+        st.markdown(f"""
+        <div class="care-card">
+            <div style="margin-bottom: 8px;"><span class='badge-event'>📅 {when}</span> {cost_badge}</div>
+            <h4 style="margin: 4px 0; color: #0E2A5C;">{evt.get('title')}</h4>
+            <div class="card-meta">📍 {evt.get('location_name')}, {evt.get('city')}, {evt.get('state')} {evt_zip} • {miles:.0f} mi away</div>
+            <div class="card-meta">🩺 <strong>Services:</strong> {', '.join(evt.get('services', []))}</div>
+            <div class="card-meta">⏰ {evt.get('time_details')}</div>
+            <div class="source-meta">Source: {evt.get('source_name')} • Checked {format_checked_date(evt.get('last_checked'))}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("View event details", key=f"btn_evt_home_{evt.get('id')}", use_container_width=True):
+            st.session_state["selected_care_id"] = evt.get("id")
+            st.session_state["selected_care_type"] = "event"
+            st.session_state["search_loc"] = clean_loc
+            st.switch_page("pages/2_📋_Care_Details.py")
+elif ram_status is not None and not ram_status.ok:
+    st.warning("The pop-up clinic calendar couldn't be reached just now. Please try again in a few minutes.")
 else:
-    st.info(f"ℹ️ **No upcoming mobile clinics currently scheduled directly in ZIP {clean_loc}.**")
-    st.caption("Use the search bar above or click **🔍 Find Free Care Now** to explore all year-round safety net clinics and free care options.")
+    st.info(f"No free pop-up clinics are scheduled within {POPUP_RADIUS_MILES} miles of {home_label} right now.")
+    st.caption("This list updates automatically from Remote Area Medical's live calendar. "
+               "Tap **Find free care** to see year-round free and low-cost clinics.")
 
 # Footer
 st.markdown("---")

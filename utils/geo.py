@@ -591,8 +591,15 @@ def geocode_location(location_query: str) -> Tuple[float, float, str]:
     elif "GREENSBORO" in cleaned:
         return NC_ZIP_COORDINATES["27401"]
 
-    # Numeric ZIP (5 or 6 digit) not in local cache
+    # Any other U.S. ZIP: use its location from the U.S. Census ZIP list
     if cleaned.isdigit():
+        try:
+            from live.zip_centroids import coords_for_zip
+            coords = coords_for_zip(cleaned)
+        except Exception:
+            coords = None
+        if coords:
+            return coords[0], coords[1], f"ZIP {cleaned[:5]}"
         return DEFAULT_LAT, DEFAULT_LON, f"ZIP {cleaned} (Area)"
 
     return DEFAULT_LAT, DEFAULT_LON, "Research Triangle, NC"

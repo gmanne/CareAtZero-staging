@@ -15,7 +15,8 @@ from database.db import get_all_sites, get_all_events, is_care_saved, toggle_sav
 from scoring.care_access_score import calculate_care_access_score
 from utils.geo import geocode_location, haversine_distance, get_directions_url, get_user_current_zip
 from utils.styles import inject_custom_css, render_header, LOGO_PATH
-from utils.dates import today_str
+from utils.dates import today_str, format_event_dates
+from live.sources import load_live_data
 
 
 st.set_page_config(
@@ -89,11 +90,21 @@ with st.container():
 # Geocode location
 user_lat, user_lon, loc_label = geocode_location(location_input)
 
-# Fetch data from SQLite
-sites = get_all_sites()
+# Live data: HRSA, NC DHHS, SAMHSA and RAM (fetched together, kept for a few hours)
 current_date_ref = today_str()
-events = get_all_events(include_expired=False, current_date_str=current_date_ref)
+with st.spinner("Getting the latest clinics from HRSA, NC DHHS, SAMHSA and Remote Area Medical..."):
+    live = load_live_data(user_lat, user_lon)
+sites = live.sites
+events = live.events
 all_records = sites + events
+
+if live.using_saved_directory:
+    st.warning("The live data sources can't be reached right now, so these results come from the saved "
+               "CareAtZero directory (last verified September 2026). Call ahead to confirm details.")
+else:
+    down = [s.name for s in live.statuses if not s.ok]
+    if down:
+        st.caption("Temporarily unavailable, so not included: " + ", ".join(down) + ". Try again in a few minutes.")
 
 # Filter and score records
 scored_records = []
@@ -115,7 +126,9 @@ for rec in all_records:
     # 3. Calculate distance
     rec_lat = rec.get("latitude")
     rec_lon = rec.get("longitude")
-    dist = haversine_distance(user_lat, user_lon, rec_lat, rec_lon) if rec_lat and rec_lon else 12.0
+    if rec_lat is None or rec_lon is None:
+        continue  # no location, so no honest distance: leave it out rather than guess
+    dist = haversine_distance(user_lat, user_lon, rec_lat, rec_lon)
 
     if dist > max_dist:
         continue
@@ -202,10 +215,17 @@ if view_mode == "🗺️ Map View":
     st.markdown("<div style='margin-bottom: 25px;'></div>", unsafe_allow_html=True)
 
 # List View of Results
+PAGE_SIZE = 25
+search_key = (service_needed, location_input, timing_pref)
+if st.session_state.get("results_search_key") != search_key:
+    st.session_state["results_search_key"] = search_key
+    st.session_state["results_shown"] = PAGE_SIZE
+shown = st.session_state.get("results_shown", PAGE_SIZE)
+
 if not scored_records:
     st.warning(f"No {service_needed} care options found within {max_dist} miles of {loc_label} matching your criteria. Try expanding the distance slider or choosing 'All Low-Cost & Free'.")
 else:
-    for idx, item in enumerate(scored_records):
+    for idx, item in enumerate(scored_records[:shown]):
         rec = item["record"]
         score = item["score"]
         dist = item["distance"]
@@ -220,12 +240,14 @@ else:
             cost_badge = "<span class='badge-free'>FREE ($0)</span>"
         elif cost_class == "Very Low Cost":
             cost_badge = "<span class='badge-lowcost'>VERY LOW COST</span>"
-        else:
+        elif cost_class == "Sliding Scale":
             cost_badge = "<span class='badge-sliding'>SLIDING SCALE</span>"
+        else:
+            cost_badge = "<span class='badge-sliding'>COST: ASK THE CLINIC</span>"
 
         type_badge = "<span class='badge-event'>🚐 POP-UP EVENT</span>" if is_event else "<span class='badge-lowcost'>🏥 PERMANENT CLINIC</span>"
 
-        timing_text = f"📅 Event Date: <strong>{rec.get('date_start')}</strong> ({rec.get('time_details')})" if is_event else f"⏰ Hours: {rec.get('hours_summary')}"
+        timing_text = f"📅 <strong>{format_event_dates(rec.get('date_start'), rec.get('date_end'))}</strong> ({rec.get('time_details')})" if is_event else f"⏰ Hours: {rec.get('hours_summary')}"
         appt_text = f"📋 Rule: {rec.get('appointment_rule')}"
         docs_text = f"📄 What to bring: {', '.join(rec.get('documents_required', ['Photo ID']))}"
 
@@ -241,7 +263,7 @@ else:
                     ⭐ Care Access Score: <strong>{score}/100</strong>
                 </div>
             </div>
-            <div class="card-meta">📍 <strong>{rec.get('address')}, {rec.get('city')}, NC</strong> • <span style="color:#2563EB; font-weight:600;">{dist} miles away</span></div>
+            <div class="card-meta">📍 <strong>{rec.get('address')}, {rec.get('city')}, {rec.get('state') or 'NC'}</strong> • <span style="color:#2563EB; font-weight:600;">{dist} miles away</span></div>
             <div class="card-meta">🩺 <strong>Services:</strong> {', '.join(rec.get('services', []))}</div>
             <div class="card-meta">{timing_text}</div>
             <div class="card-meta">{appt_text}</div>
@@ -278,11 +300,13 @@ else:
                 st.button("Call", icon=":material/call:", disabled=True, key=f"call_dis_{idx}", use_container_width=True)
 
         with btn_c3:
-            addr = f"{rec.get('address')}, {rec.get('city')}, NC"
+            addr = f"{rec.get('address')}, {rec.get('city')}, {rec.get('state') or 'NC'} {rec.get('zip_code') or ''}".strip()
             maps_url = get_directions_url(addr, rec.get("latitude"), rec.get("longitude"))
             st.link_button("Directions", maps_url, use_container_width=True)
 
         st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
-
-
+    if len(scored_records) > shown:
+        if st.button(f"Show more ({len(scored_records) - shown} more)", key="btn_show_more", use_container_width=True):
+            st.session_state["results_shown"] = shown + PAGE_SIZE
+            st.rerun()

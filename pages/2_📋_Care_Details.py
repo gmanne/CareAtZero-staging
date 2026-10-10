@@ -15,7 +15,8 @@ from utils.calendar import generate_ics_calendar
 from utils.export import generate_shareable_referral_text
 from utils.geo import get_directions_url, geocode_location, haversine_distance, get_user_current_zip
 from utils.styles import inject_custom_css, render_header, LOGO_PATH
-from utils.dates import today_str
+from utils.dates import today_str, format_checked_date, format_event_dates
+from live.sources import find_record
 
 
 st.set_page_config(
@@ -37,11 +38,12 @@ if not selected_id:
     selected_id = "site_shac_01"
     selected_type = "site"
 
-# Fetch record
-if selected_type == "event":
-    record = get_event_by_id(selected_id)
-else:
-    record = get_site_by_id(selected_id)
+# Where the user searched from (also used to find the live record and its distance)
+user_loc = st.session_state.get("search_loc") or get_user_current_zip()
+u_lat, u_lon, loc_label = geocode_location(user_loc)
+
+# Fetch record: live data first, then the saved directory
+record = find_record(selected_id, u_lat, u_lon)
 
 if not record:
     st.error(f"Care option with ID '{selected_id}' not found.")
@@ -49,19 +51,25 @@ if not record:
         st.switch_page("pages/1_🔍_Find_Free_Care.py")
     st.stop()
 
+FACILITY_LABELS = {
+    "fqhc": "Federally funded community health center",
+    "free_clinic": "Free & charitable clinic",
+    "behavioral_health": "Behavioral health treatment facility",
+    "mobile": "Mobile clinic",
+}
+
 # Basic fields
 title = record.get("title") or record.get("name")
 cost_class = record.get("cost_class", "Sliding Scale")
 is_event = record.get("record_type") == "event"
 full_addr = f"{record.get('address')}, {record.get('city')}, {record.get('state')} {record.get('zip_code')}"
 
-# Calculate score breakdown for details
-user_loc = st.session_state.get("search_loc") or get_user_current_zip()
-u_lat, u_lon, loc_label = geocode_location(user_loc)
-dist = haversine_distance(u_lat, u_lon, record.get("latitude"), record.get("longitude"))
+# Calculate score breakdown for details (for the type of care the user searched for)
+has_location = record.get("latitude") is not None and record.get("longitude") is not None
+dist = haversine_distance(u_lat, u_lon, record.get("latitude"), record.get("longitude")) if has_location else 0.0
 score, breakdown, reasons = calculate_care_access_score(
     record=record,
-    service_needed="Medical",
+    service_needed=st.session_state.get("selected_service", "Medical"),
     distance_miles=dist,
     reference_date_str=today_str()
 )
@@ -71,9 +79,11 @@ if st.button("Back to results", icon=":material/arrow_back:", type="tertiary"):
     st.switch_page("pages/1_🔍_Find_Free_Care.py")
 
 # Title Header & Badges
-cost_badge = "<span class='badge-free'>100% FREE CARE ($0)</span>" if cost_class == "Free" else (
-    "<span class='badge-lowcost'>VERY LOW COST ($5-$25)</span>" if cost_class == "Very Low Cost" else "<span class='badge-sliding'>SLIDING SCALE DISCOUNT</span>"
-)
+cost_badge = {
+    "Free": "<span class='badge-free'>100% FREE CARE ($0)</span>",
+    "Very Low Cost": "<span class='badge-lowcost'>VERY LOW COST ($5-$25)</span>",
+    "Sliding Scale": "<span class='badge-sliding'>SLIDING SCALE DISCOUNT</span>",
+}.get(cost_class, "<span class='badge-sliding'>COST: ASK THE CLINIC</span>")
 type_badge = "<span class='badge-event'>🚐 MOBILE / POP-UP EVENT</span>" if is_event else "<span class='badge-lowcost'>🏥 PERMANENT SAFETY-NET CLINIC</span>"
 
 st.markdown(f"""
@@ -156,7 +166,7 @@ with left_col:
     st.subheader("When to go")
     if is_event:
         st.markdown(f"""
-        - **Event Dates:** {record.get('date_start')} to {record.get('date_end')}
+        - **Dates:** {format_event_dates(record.get('date_start'), record.get('date_end'))}
         - **Hours:** {record.get('time_details')}
         - **Intake Rule:** {record.get('appointment_rule')}
         - **Organizer:** {record.get('organizer_name')}
@@ -165,7 +175,7 @@ with left_col:
         st.markdown(f"""
         - **Operating Hours:** {record.get('hours_summary')}
         - **Appointment Rule:** {record.get('appointment_rule')}
-        - **Facility Type:** {record.get('type').upper()}
+        - **Facility type:** {FACILITY_LABELS.get(record.get('type') or '', (record.get('type') or 'Clinic').replace('_', ' ').title())}
         """)
 
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
@@ -197,14 +207,21 @@ with right_col:
     st.subheader("Where this comes from")
     source_name = record.get("source_name", "Official Directory Feed")
     source_url = record.get("source_url", "https://careatzero.org")
-    last_checked = record.get("last_checked") or "Not listed"
-    source_status = record.get("source_status", "active")
+    last_checked = format_checked_date(record.get("last_checked")) if record.get("last_checked") else "Not listed"
+    if record.get("is_live"):
+        status_label, status_color = f"LIVE — fetched {last_checked}", "green"
+    elif "manually verified" in source_name or "saved copy" in source_name:
+        status_label, status_color = f"Saved directory — last verified {last_checked}", "orange"
+    else:
+        status_label = (record.get("source_status") or "active").upper()
+        status_color = "green" if status_label == "ACTIVE" else "orange"
+    website = record.get("website") or source_url
 
     st.markdown(f"""
     - **Primary Source:** [{source_name}]({source_url})
-    - **Last Verified Date:** {last_checked}
-    - **Feed Status:** <span style="color: {'green' if source_status == 'active' else 'orange'}; font-weight: 600;">{source_status.upper()}</span>
-    - **Official Website:** [{record.get('website', source_url)}]({record.get('website', source_url)})
+    - **Last checked:** {last_checked}
+    - **Data status:** <span style="color: {status_color}; font-weight: 600;">{status_label}</span>
+    - **Website:** [{website}]({website})
     """, unsafe_allow_html=True)
 
 
