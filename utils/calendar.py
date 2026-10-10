@@ -1,68 +1,80 @@
 import datetime
-from typing import Dict, Any
+from typing import Any, Dict
+
+from utils.dates import today
+
+
+def _ics_text(value: Any) -> str:
+    """Escape text for a calendar file (commas, semicolons, backslashes and new lines are special)."""
+    return (str(value or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+            .replace("\r\n", "\\n").replace("\n", "\\n"))
+
+
+def _fold(line: str) -> str:
+    """Calendar lines longer than 75 characters are split, each new part starting with a space."""
+    parts = []
+    while len(line.encode("utf-8")) > 75:
+        cut = 75
+        while len(line[:cut].encode("utf-8")) > 75:
+            cut -= 1
+        parts.append(line[:cut])
+        line = " " + line[cut:]
+    parts.append(line)
+    return "\r\n".join(parts)
 
 
 def generate_ics_calendar(event: Dict[str, Any]) -> str:
     """
-    Generates standard RFC 5545 iCalendar (.ics) string for a mobile care event or clinic visit.
-    Can be directly downloaded and imported into Google Calendar, Apple Calendar, Outlook, etc.
+    A calendar file (.ics, RFC 5545) for a pop-up event or a clinic visit, which opens in
+    Google Calendar, Apple Calendar or Outlook.
+    - Pop-up events: an all-day entry for each day of the event.
+    - Permanent clinics: an all-day reminder for today, since their hours vary
+      ("Call for current hours"); the clinic's phone number is in the notes.
     """
-    title = event.get("title") or event.get("name", "CareAtZero Health Appointment")
+    title = event.get("title") or event.get("name") or "CareAtZero health visit"
     location = f"{event.get('address', '')}, {event.get('city', '')}, {event.get('state', '')} {event.get('zip_code', '')}".strip(" ,")
-    organizer = event.get("organizer_name") or event.get("name", "CareAtZero Safety Net Care")
-    cost_class = event.get("cost_class", "Free")
-    phone = event.get("phone", "N/A")
-    website = event.get("source_url") or event.get("website", "https://careatzero.org")
-
-    # Format dates
-    date_start_str = event.get("date_start") or datetime.date.today().isoformat()
-    date_end_str = event.get("date_end") or date_start_str
+    cost_class = event.get("cost_class") or "Unknown"
+    cost_label = "Cost: ask the clinic" if cost_class == "Unknown" else cost_class
+    phone = event.get("phone") or "not listed"
+    website = event.get("website") or event.get("source_url") or ""
 
     try:
-        dt_start = datetime.date.fromisoformat(date_start_str)
-        dt_end = datetime.date.fromisoformat(date_end_str)
-    except Exception:
-        dt_start = datetime.date.today()
-        dt_end = dt_start
+        start = datetime.date.fromisoformat(str(event.get("date_start"))[:10])
+        end = datetime.date.fromisoformat(str(event.get("date_end") or event.get("date_start"))[:10])
+    except ValueError:
+        start = end = today()  # a clinic visit: today in the user's time zone
+    end_exclusive = end + datetime.timedelta(days=1)  # all-day events end the morning after
 
-    # Format times
-    start_fmt = dt_start.strftime("%Y%m%d") + "T080000"
-    end_fmt = dt_end.strftime("%Y%m%d") + "T160000"
-    now_stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    uid = f"careatzero-{event.get('id', 'evt')}-{start_fmt}@careatzero.org"
+    now_stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    uid = f"careatzero-{event.get('id', 'visit')}-{start:%Y%m%d}@careatzero"
 
-    docs = ", ".join(event.get("documents_required", ["Photo ID (if available)"]))
-    services = ", ".join(event.get("services", ["Medical/Dental/Vision"]))
-    appt_rule = event.get("appointment_rule", "First come, first served")
+    description = "\n".join([
+        f"Cost: {cost_label}",
+        f"Services: {', '.join(event.get('services') or [])}",
+        f"Hours: {event.get('time_details') or event.get('hours_summary') or 'Call for current hours'}",
+        f"How to get in: {event.get('appointment_rule') or 'Call ahead'}",
+        f"What to bring: {', '.join(event.get('documents_required') or ['Call to confirm'])}",
+        f"Phone: {phone}",
+        f"More info: {website}",
+        "Found with CareAtZero. Emergency: call 911. Crisis: call or text 988.",
+    ])
 
-    description = (
-        f"CareAtZero Free/Low-Cost Care Event\\n\\n"
-        f"Cost: {cost_class}\\n"
-        f"Services: {services}\\n"
-        f"Appointment Rule: {appt_rule}\\n"
-        f"What to bring: {docs}\\n"
-        f"Contact Phone: {phone}\\n"
-        f"Official Source: {website}\\n\\n"
-        f"Important: Arrive early for walk-in/pop-up care clinics."
-    )
-
-    ics_content = f"""BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//CareAtZero//SafetyNet Health Discovery//EN
-CALSCALE:GREGORIAN
-METHOD:PUBLISH
-BEGIN:VEVENT
-UID:{uid}
-DTSTAMP:{now_stamp}
-DTSTART:{start_fmt}
-DTEND:{end_fmt}
-SUMMARY:[{cost_class}] {title}
-LOCATION:{location}
-DESCRIPTION:{description}
-ORGANIZER;CN={organizer}:mailto:info@careatzero.org
-STATUS:CONFIRMED
-TRANSP:OPAQUE
-END:VEVENT
-END:VCALENDAR"""
-
-    return ics_content.strip()
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//CareAtZero//Free care finder//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "BEGIN:VEVENT",
+        f"UID:{uid}",
+        f"DTSTAMP:{now_stamp}",
+        f"DTSTART;VALUE=DATE:{start:%Y%m%d}",
+        f"DTEND;VALUE=DATE:{end_exclusive:%Y%m%d}",
+        f"SUMMARY:{_ics_text(f'[{cost_label}] {title}')}",
+        f"LOCATION:{_ics_text(location)}",
+        f"DESCRIPTION:{_ics_text(description)}",
+        "TRANSP:TRANSPARENT",
+        "END:VEVENT",
+        "END:VCALENDAR",
+    ]
+    return "\r\n".join(_fold(line) for line in lines) + "\r\n"

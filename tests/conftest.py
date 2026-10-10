@@ -14,3 +14,6 @@ import os
 
 os.environ.setdefault("CAREATZERO_TODAY", "2026-09-16")
 os.environ.setdefault("CAREATZERO_OFFLINE", "1")
+# ...and without the saved copies in data/snapshots/, so "everything down" really is everything
+# (tests/test_live_sources.py tests the saved copies with its own files)
+os.environ.setdefault("CAREATZERO_SNAPSHOT_DIR", os.path.join(os.path.dirname(__file__), "_no_snapshots"))

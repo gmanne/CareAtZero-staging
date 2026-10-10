@@ -10,7 +10,6 @@ if PROJECT_ROOT not in sys.path:
 import base64
 
 LOGO_PATH = os.path.join(PROJECT_ROOT, "assets", "logo.png")
-BANNER_PATH = os.path.join(PROJECT_ROOT, "assets", "brand_banner.png")
 MARK_PATH = os.path.join(PROJECT_ROOT, "assets", "brand_mark.png")          # the "CO" mark, transparent
 WORDMARK_PATH = os.path.join(PROJECT_ROOT, "assets", "brand_wordmark.png")  # "CareAtZero" in the logo's lettering
 
@@ -35,16 +34,6 @@ def _file_base64(path: str) -> str:
         except Exception:
             return ""
     return ""
-
-
-def get_logo_base64() -> str:
-    """Returns base64 encoded string of the brand logo for inline HTML embedding."""
-    return _file_base64(LOGO_PATH)
-
-
-def get_banner_base64() -> str:
-    """Returns base64 encoded string of the brand hero banner for inline HTML embedding."""
-    return _file_base64(BANNER_PATH)
 
 
 def inject_custom_css():
@@ -234,11 +223,6 @@ def render_header(active_page: str = "home"):
     render_bottom_nav(active_page)
 
 
-def render_top_nav(active_page: str = "home"):
-    """Kept for compatibility: navigation now lives in the bottom tab bar."""
-    render_bottom_nav(active_page)
-
-
 def render_bottom_nav(active_page: str = "home"):
     """
     Fixed tab bar at the bottom of the screen. The Detail screen belongs to Find,
@@ -253,6 +237,6 @@ def render_bottom_nav(active_page: str = "home"):
             cols = st.columns(len(NAV_TABS))
             for col, (label, icon, page_key, page_file) in zip(cols, NAV_TABS):
                 with col:
-                    if st.button(label, icon=icon, key=f"nav_{page_key}", type="tertiary", use_container_width=True):
+                    if st.button(label, icon=icon, key=f"nav_{page_key}", type="tertiary", width="stretch"):
                         if page_key != active_page:
                             st.switch_page(page_file)

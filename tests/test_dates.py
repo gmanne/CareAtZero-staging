@@ -52,3 +52,32 @@ def test_event_countdown_uses_today(monkeypatch):
 def test_checked_date_display():
     assert dates.format_checked_date("2026-09-05") == "Sep 5, 2026"
     assert dates.format_checked_date("") == "date not listed"
+
+
+def test_live_fetch_time_shown_in_eastern_time():
+    # 01:36 UTC on Oct 10 is 9:36 PM on Oct 9 in North Carolina (EDT)
+    assert dates.checked_parts("2026-10-10T01:36:30+00:00") == ("Oct 9, 2026", "9:36 PM EDT")
+    assert dates.format_checked("2026-10-10T01:36:30+00:00") == "Oct 9, 2026 at 9:36 PM EDT"
+    assert dates.format_checked_date("2026-10-10T01:36:30+00:00") == "Oct 9, 2026"
+    # winter: standard time
+    assert dates.checked_parts("2026-12-01T17:05:00+00:00") == ("Dec 1, 2026", "12:05 PM EST")
+    # hand-verified records have only a date
+    assert dates.checked_parts("2026-09-16") == ("Sep 16, 2026", None)
+    assert dates.format_checked("2026-09-16") == "Sep 16, 2026"
+
+
+def test_times_follow_the_search_area_time_zone():
+    fetched = "2026-10-10T01:36:30+00:00"
+    assert dates.checked_parts(fetched, "America/Chicago") == ("Oct 9, 2026", "8:36 PM CDT")
+    assert dates.checked_parts(fetched, "America/Phoenix") == ("Oct 9, 2026", "6:36 PM MST")
+    assert dates.checked_parts(fetched, "America/Los_Angeles") == ("Oct 9, 2026", "6:36 PM PDT")
+    assert dates.checked_parts(fetched, "Pacific/Honolulu") == ("Oct 9, 2026", "3:36 PM HST")
+    assert dates.timezone_label("America/Chicago") == "Central Time"
+
+
+def test_time_zone_found_from_map_position():
+    from utils.timezones import timezone_for
+    assert timezone_for(35.77, -78.63) == "America/New_York"     # Raleigh, NC
+    assert timezone_for(36.16, -86.78) == "America/Chicago"      # Nashville, TN
+    assert timezone_for(33.45, -112.07) == "America/Phoenix"     # Phoenix, AZ
+    assert timezone_for(None, None) is None

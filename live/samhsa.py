@@ -50,7 +50,7 @@ def _query(s_addr: str, radius_miles: float, limit: int) -> List[dict]:
         raise SourceUnavailable(f"FindTreatment.gov returned unreadable data: {e}") from e
 
 
-def fetch_raw(lat: float, lon: float, radius_miles: float = 40, limit: int = 200) -> List[dict]:
+def fetch_raw(lat: float, lon: float, radius_miles: float = 60, limit: int = 200) -> List[dict]:
     """
     Facilities within radius_miles of (lat, lon), nearest first.
     The developer guide's text says longitude first but its example URLs put latitude
@@ -107,5 +107,5 @@ def parse(rows: List[dict], checked: str) -> List[dict]:
     return sites
 
 
-def fetch(lat: float, lon: float, radius_miles: float = 40) -> List[dict]:
+def fetch(lat: float, lon: float, radius_miles: float = 60) -> List[dict]:
     return parse(fetch_raw(lat, lon, radius_miles), fetched_at())

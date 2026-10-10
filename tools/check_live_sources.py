@@ -21,7 +21,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from live import hrsa, nc_safety_net, ram_events, samhsa, zip_centroids  # noqa: E402
+from live import hrsa, nc_safety_net, ram_events, samhsa, snapshots, zip_centroids  # noqa: E402
 from live.common import fetched_at  # noqa: E402
 from utils.dates import today  # noqa: E402
 
@@ -60,6 +60,9 @@ def check_hrsa():
     raw = hrsa.fetch_raw("NC")
     with open(os.path.join(SAMPLES, "hrsa.json"), "w", encoding="utf-8") as f:
         json.dump({"features": raw}, f)
+    if raw:
+        saved = snapshots.save("hrsa", raw, fetched_at(), hrsa.QUERY_URL)
+        print(f"   Saved copy updated: {os.path.relpath(saved, ROOT)}")
     show("HRSA", hrsa.parse(raw, fetched_at()), ["name", "city", "zip_code", "phone", "cost_class"])
 
 
@@ -67,6 +70,9 @@ def check_nc():
     text = nc_safety_net.fetch_raw()
     with open(os.path.join(SAMPLES, "nc_safety_net.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(text)
+    if nc_safety_net.parse(text, fetched_at()):
+        saved = snapshots.save("nc_safety_net", text, fetched_at(), nc_safety_net.CSV_URL)
+        print(f"   Saved copy updated: {os.path.relpath(saved, ROOT)}")
     sites = nc_safety_net.parse(text, fetched_at())
     show("NC", sites, ["name", "type", "city", "zip_code", "cost_class"])
     free = sum(1 for s in sites if s["cost_class"] == "Free")
@@ -81,9 +87,11 @@ def check_samhsa():
 
 
 def check_ram():
-    text = ram_events.http_get(ram_events.FEED_URL, timeout=30).text
+    text = ram_events.fetch_raw()
     with open(os.path.join(SAMPLES, "ram.ics"), "w", encoding="utf-8", newline="") as f:
         f.write(text)
+    ram_events.save_snapshot(text, fetched_at())
+    print(f"   Saved copy updated: {os.path.relpath(snapshots.path_for('ram'), ROOT)}")
     events = ram_events.parse(text, fetched_at(), today())
     show("RAM", events, ["title", "date_start", "date_end", "city", "state", "services"])
     nc = [e for e in events if e["state"] == "NC"]
@@ -103,4 +111,5 @@ if __name__ == "__main__":
     for name, ok in results.items():
         print(f"   {'OK    ' if ok else 'FAILED'}  {name}")
     print(f"\nRaw samples saved in {os.path.relpath(SAMPLES, ROOT)}")
+    print("Saved copies updated in data/snapshots/ - commit them so the live app has them.")
     sys.exit(0 if all(results.values()) else 1)

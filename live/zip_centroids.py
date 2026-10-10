@@ -88,6 +88,24 @@ def load() -> Dict[str, Tuple[float, float]]:
     return _cache
 
 
+def nearest_zip(lat: float, lon: float, max_miles: float = 25.0) -> Optional[str]:
+    """The ZIP code whose center is closest to (lat, lon), or None if none is within max_miles."""
+    try:
+        centroids = load()
+    except Exception:
+        return None
+    import math
+    best, best_d = None, None
+    cos_lat = math.cos(math.radians(lat))
+    for z, (zl, zo) in centroids.items():
+        d = (zl - lat) ** 2 + ((zo - lon) * cos_lat) ** 2  # fast flat-earth distance, fine at this scale
+        if best_d is None or d < best_d:
+            best, best_d = z, d
+    if best is None or math.sqrt(best_d) * 69.0 > max_miles:
+        return None
+    return best
+
+
 def coords_for_zip(zip_code: str) -> Optional[Tuple[float, float]]:
     """(lat, lon) for a 5-digit ZIP, or None if unknown or the ZIP list can't be loaded."""
     zip5 = (zip_code or "").strip()[:5]

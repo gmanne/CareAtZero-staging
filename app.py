@@ -1,6 +1,8 @@
-import streamlit as st
 import os
 import sys
+from html import escape
+
+import streamlit as st
 
 # Ensure project root is strictly first in sys.path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -9,13 +11,14 @@ if not sys.path or sys.path[0] != PROJECT_ROOT:
         sys.path.remove(PROJECT_ROOT)
     sys.path.insert(0, PROJECT_ROOT)
 
-from database.db import get_all_events, init_db, DB_PATH
+from database.db import DB_PATH
 from data.seed_data import seed_database
 from utils.styles import inject_custom_css, render_header, render_emergency_banner, LOGO_PATH
-from utils.dates import today_str, format_checked_date, format_event_dates
-from live.sources import load_live_data
+from utils.timezones import use_timezone_of
+from utils.dates import format_checked, format_event_dates
+from live.sources import load_live_data, warm_up
 from utils.geo import (
-    NC_ZIP_COORDINATES, get_user_current_zip, detect_user_location,
+    get_user_current_zip, detect_user_location,
     set_simulated_location, US_SIMULATION_PRESETS, geocode_location, haversine_distance,
     inject_client_geo_detector, safe_city_name
 )
@@ -39,7 +42,8 @@ inject_custom_css()
 # Logo bar + bottom tab bar
 render_header("home")
 
-# Inject client-side location detector (fetches real user location directly in browser on mobile and desktop)
+# Find the user's location in their browser (GPS if allowed, else internet connection);
+# the result comes back to this session without reloading the page
 inject_client_geo_detector()
 
 
@@ -68,7 +72,7 @@ for row_start in (0, 2):
                 with st.container(key=f"svc_{service.replace(' ', '_').lower()}"):
                     label = "Mental health" if service == "Behavioral Health" else service
                     if st.button(f"{label}  \n:gray[{desc}]", icon=icon, key=f"care_card_{service}",
-                                 use_container_width=True,
+                                 width="stretch",
                                  type="primary" if st.session_state["home_service"] == service else "secondary"):
                         st.session_state["home_service"] = service
                         st.rerun()
@@ -80,11 +84,13 @@ saved_loc = st.session_state.get("search_loc")
 if saved_loc and str(saved_loc).strip():
     default_loc = str(saved_loc).strip()
 else:
-    default_loc = user_detected_zip
-    st.session_state["search_loc"] = user_detected_zip
+    default_loc = user_detected_zip  # "" if the location couldn't be detected
+    if user_detected_zip:
+        st.session_state["search_loc"] = user_detected_zip
+        st.session_state["search_loc_auto"] = True  # filled in for the user, not typed
 
 loc_info = detect_user_location()
-city_label = safe_city_name(loc_info.get("city", ""))
+city_label = safe_city_name(loc_info.get("city", "")) if user_detected_zip else ""
 location_desc = f"{city_label} ({user_detected_zip})" if city_label else user_detected_zip
 
 timing_labels = {"Today": "Today", "This Week": "This week", "Flexible (Upcoming)": "Any time"}
@@ -93,8 +99,9 @@ with st.form(key="home_quick_search_form", clear_on_submit=False, border=False):
     quick_loc = st.text_input(
         "Where are you? (ZIP code or city)",
         value=default_loc,
-        placeholder=f"e.g., {user_detected_zip} or Raleigh",
-        help=f"Detected location: {location_desc}",
+        placeholder="Enter your ZIP code",
+        help=(f"Detected location: {location_desc}. You can type any ZIP code or city."
+              if user_detected_zip else "Enter a ZIP code or city anywhere in the U.S."),
         key="home_search_loc_input"
     )
     quick_timing = st.segmented_control(
@@ -102,12 +109,15 @@ with st.form(key="home_quick_search_form", clear_on_submit=False, border=False):
         default="This Week", key="home_timing"
     ) or "This Week"
     search_submitted = st.form_submit_button("Find free care", icon=":material/search:", type="primary",
-                                             use_container_width=True, key="home_find_care_submit_btn")
+                                             width="stretch", key="home_find_care_submit_btn")
 
-if search_submitted:
-    target_search = str(quick_loc).strip() if quick_loc and str(quick_loc).strip() else default_loc
+if search_submitted and not (quick_loc and str(quick_loc).strip()):
+    st.error("Enter your ZIP code (or city) to find care near you.")
+elif search_submitted:
+    target_search = str(quick_loc).strip()
     st.session_state["selected_service"] = st.session_state["home_service"]
     st.session_state["search_loc"] = target_search
+    st.session_state["search_loc_auto"] = False  # the user chose this location
     st.session_state["search_timing"] = quick_timing
     if hasattr(st, "query_params"):
         st.query_params.pop("client_zip", None)
@@ -118,17 +128,27 @@ if search_submitted:
 
 loc_col_a = st.container()
 with loc_col_a:
-    st.caption(f"Detected location: {location_desc}")
+    if user_detected_zip:
+        st.caption(f"Detected location: {location_desc}")
+    elif not st.session_state.get("browser_location_checked"):
+        st.caption("Finding your location... or enter your ZIP code above.")
+    else:
+        st.caption("We couldn't detect your location. Enter your ZIP code above, "
+                   "or tap **Use my location** and allow location access.")
     if st.button("Use my location", icon=":material/my_location:", key="btn_redetect_loc", help="Re-detect location using your device"):
-        st.session_state.pop("search_loc", None)
-        st.session_state.pop("detected_user_location", None)
+        for k in ("search_loc", "detected_user_location", "browser_location_checked",
+                  "server_location_lookup_failed", "home_search_loc_input"):
+            st.session_state.pop(k, None)
+        st.session_state["search_loc_auto"] = True
+        st.session_state["geo_attempt"] = st.session_state.get("geo_attempt", 0) + 1
         if hasattr(st, "query_params"):
             st.query_params.pop("geo_checked", None)
             st.query_params.pop("client_zip", None)
             st.query_params.pop("client_city", None)
         st.rerun()
 
-if st.query_params.get("test_geo") == "true":
+# Developer tool for testing location detection: only when CAREATZERO_DEBUG=1 is set
+if os.environ.get("CAREATZERO_DEBUG") == "1" and st.query_params.get("test_geo") == "true":
     with st.expander("📍 **Simulate / Test USA Geolocation (Auto-detect Testing)**", expanded=True):
         st.caption("Change simulated US location to test automatic ZIP code detection across different regions.")
         sim_col1, sim_col2 = st.columns([3, 1])
@@ -148,7 +168,7 @@ if st.query_params.get("test_geo") == "true":
             )
         with sim_col2:
             st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-            if st.button("Apply Location", key="btn_apply_sim", use_container_width=True):
+            if st.button("Apply Location", key="btn_apply_sim", width="stretch"):
                 if chosen_sim == "Auto-Detect (Current IP)":
                     set_simulated_location(None)
                 else:
@@ -157,53 +177,81 @@ if st.query_params.get("test_geo") == "true":
 
 st.markdown("---")
 
-# Live pop-up events: RAM's calendar + hand-verified community events, nearest date first
-POPUP_RADIUS_MILES = 150
-clean_loc = str(quick_loc).strip() or default_loc
-home_lat, home_lon, home_label = geocode_location(clean_loc)
-with st.spinner("Checking upcoming free pop-up clinics..."):
-    live_events = load_live_data(home_lat, home_lon, include_sites=False)
-ram_status = next((s for s in live_events.statuses if s.key == "ram"), None)
+def render_popup_card(evt, miles):
+    # Text from RAM's calendar is escaped, so it is always shown as text, never as page code
+    e = lambda key: escape(str(evt.get(key) or ""))
+    when = format_event_dates(evt.get("date_start"), evt.get("date_end"))
+    cost_badge = "<span class='badge-free'>FREE</span>" if evt.get("cost_class") == "Free" else ""
+    st.markdown(f"""
+    <div class="care-card">
+        <div style="margin-bottom: 8px;"><span class='badge-event'>📅 {when}</span> {cost_badge}</div>
+        <h4 style="margin: 4px 0; color: #0E2A5C;">{e('title')}</h4>
+        <div class="card-meta">📍 {e('location_name')}, {e('city')}, {e('state')} {e('zip_code')} • {miles:.0f} mi away</div>
+        <div class="card-meta">🩺 <strong>Services:</strong> {escape(', '.join(evt.get('services', [])))}</div>
+        <div class="card-meta">⏰ {e('time_details')}</div>
+        <div class="source-meta">Source: {e('source_name')} • Checked {format_checked(evt.get('last_checked'))}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("View event details", key=f"btn_evt_home_{evt.get('id')}", width="stretch"):
+        st.session_state["selected_care_id"] = evt.get("id")
+        st.session_state["selected_care_type"] = "event"
+        st.session_state["search_loc"] = clean_loc
+        st.switch_page("pages/2_📋_Care_Details.py")
 
-matching_events = []
-for evt in live_events.events:
-    if evt.get("latitude") is None or evt.get("longitude") is None:
-        continue
-    miles = haversine_distance(home_lat, home_lon, evt["latitude"], evt["longitude"])
-    if miles <= POPUP_RADIUS_MILES:
-        matching_events.append((evt, miles))
+
+# Live pop-up events: RAM's calendar + hand-verified community events, nearest date first
+POPUP_RADIUS_MILES = 50   # "near you" = within a reasonable drive
+NEAREST_FALLBACK_COUNT = 2  # if none are that close, show the nearest few, clearly labeled
+clean_loc = str(quick_loc or "").strip() or default_loc
+matching_events, nearest_events, ram_status = [], [], None
+place = geocode_location(clean_loc) if clean_loc else None
+if clean_loc and place is None:
+    st.warning(f"We couldn't find \"{escape(clean_loc)}\". Try a 5-digit ZIP code, like 27601.")
+    clean_loc = ""
+if place:  # no location yet -> ask for a ZIP code instead of guessing one
+    home_lat, home_lon, home_label = place
+    use_timezone_of(home_lat, home_lon)
+    with st.spinner("Checking upcoming free pop-up clinics..."):
+        live_events = load_live_data(home_lat, home_lon, include_sites=False)
+    ram_status = next((s for s in live_events.statuses if s.key == "ram"), None)
+    warm_up(home_lat, home_lon)  # start loading clinics now, so the Find screen opens instantly
+    all_events = []
+    for evt in live_events.events:
+        if evt.get("latitude") is None or evt.get("longitude") is None:
+            continue
+        miles = haversine_distance(home_lat, home_lon, evt["latitude"], evt["longitude"])
+        all_events.append((evt, miles))
+        if miles <= POPUP_RADIUS_MILES:
+            matching_events.append((evt, miles))
+    if not matching_events:
+        nearest_events = sorted(all_events, key=lambda pair: pair[1])[:NEAREST_FALLBACK_COUNT]
 
 st.subheader("Upcoming free pop-up clinics")
 st.markdown("Pop-up clinics give **free care for a day or two**, usually with no insurance, ID or income proof needed. "
             "*Arrive early for a ticket.*")
 
-if matching_events:
+if ram_status is not None and ram_status.saved_copy_from:
+    st.caption(f"RAM's live calendar couldn't be reached just now, so these come from a saved copy of it "
+               f"(saved {format_checked(ram_status.saved_copy_from)}). "
+               "Confirm on [ramusa.org/schedule](https://www.ramusa.org/schedule/) before you go.")
+
+if not clean_loc:
+    st.info("Enter your ZIP code above to see free pop-up clinics near you.")
+elif matching_events:
     st.markdown(f"**{len(matching_events)} within {POPUP_RADIUS_MILES} miles of {home_label}:**")
     for evt, miles in matching_events[:3]:
-        evt_zip = evt.get("zip_code", "")
-        when = format_event_dates(evt.get("date_start"), evt.get("date_end"))
-        cost_badge = "<span class='badge-free'>FREE</span>" if evt.get("cost_class") == "Free" else ""
-        st.markdown(f"""
-        <div class="care-card">
-            <div style="margin-bottom: 8px;"><span class='badge-event'>📅 {when}</span> {cost_badge}</div>
-            <h4 style="margin: 4px 0; color: #0E2A5C;">{evt.get('title')}</h4>
-            <div class="card-meta">📍 {evt.get('location_name')}, {evt.get('city')}, {evt.get('state')} {evt_zip} • {miles:.0f} mi away</div>
-            <div class="card-meta">🩺 <strong>Services:</strong> {', '.join(evt.get('services', []))}</div>
-            <div class="card-meta">⏰ {evt.get('time_details')}</div>
-            <div class="source-meta">Source: {evt.get('source_name')} • Checked {format_checked_date(evt.get('last_checked'))}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("View event details", key=f"btn_evt_home_{evt.get('id')}", use_container_width=True):
-            st.session_state["selected_care_id"] = evt.get("id")
-            st.session_state["selected_care_type"] = "event"
-            st.session_state["search_loc"] = clean_loc
-            st.switch_page("pages/2_📋_Care_Details.py")
-elif ram_status is not None and not ram_status.ok:
+        render_popup_card(evt, miles)
+elif ram_status is not None and not ram_status.ok and not ram_status.saved_copy_from:
     st.warning("The pop-up clinic calendar couldn't be reached just now. Please try again in a few minutes.")
 else:
-    st.info(f"No free pop-up clinics are scheduled within {POPUP_RADIUS_MILES} miles of {home_label} right now.")
-    st.caption("This list updates automatically from Remote Area Medical's live calendar. "
-               "Tap **Find free care** to see year-round free and low-cost clinics.")
+    st.info(f"No free pop-up clinics are scheduled within {POPUP_RADIUS_MILES} miles of {home_label} right now. "
+            "Tap **Find free care** to see clinics near you that are open all year.")
+    if nearest_events:
+        st.markdown("**Nearest upcoming pop-up clinics** (farther away):")
+        for evt, miles in nearest_events:
+            render_popup_card(evt, miles)
+    st.caption("This list updates automatically from Remote Area Medical's live calendar "
+               "([full schedule](https://www.ramusa.org/schedule/)).")
 
 # Footer
 st.markdown("---")

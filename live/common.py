@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 import requests
 
 USER_AGENT = "CareAtZero/1.0 (student project; free-care finder for uninsured patients)"
-TIMEOUT_SECONDS = 20
+TIMEOUT_SECONDS = 8  # a slow site must not hold up a search for long
 
 
 class SourceUnavailable(Exception):

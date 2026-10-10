@@ -37,7 +37,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-if st.button("Not an emergency? Find a free clinic", icon=":material/search:", use_container_width=True):
+if st.button("Not an emergency? Find a free clinic", icon=":material/search:", width="stretch"):
     st.switch_page("pages/1_🔍_Find_Free_Care.py")
 
 st.caption("CareAtZero does not diagnose symptoms or give medical advice. "

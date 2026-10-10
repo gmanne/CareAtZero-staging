@@ -231,3 +231,107 @@ def test_real_ram_sample(monkeypatch):
     with open(_sample("ram.ics"), encoding="utf-8") as f:
         events = ram_events.parse(f.read(), CHECKED, datetime.date(2000, 1, 1))
     assert events and all(e["date_end"] >= e["date_start"] for e in events)
+
+
+# ---------- RAM's site answering with a web page instead of the calendar ----------
+
+class _Page:
+    text = "<!DOCTYPE html><html><head><title>Just a moment...</title></head></html>"
+
+
+def test_ram_web_page_is_unavailable_not_empty(monkeypatch):
+    monkeypatch.setattr(ram_events, "http_get", lambda *a, **k: _Page())
+    with pytest.raises(sources.SourceUnavailable):
+        ram_events.fetch(TODAY)
+
+
+def test_ram_down_uses_labeled_saved_copy(monkeypatch, tmp_path):
+    from live import snapshots
+    monkeypatch.setattr(snapshots, "SNAPSHOT_DIR", str(tmp_path))
+    ram_events.save_snapshot(RAM_ICS, "2026-10-10T01:21:20+00:00")
+    data = sources.load_live_data(35.77, -78.63, include_sites=False)  # tests run offline
+    ram = next(s for s in data.statuses if s.key == "ram")
+    assert not ram.ok and ram.saved_copy_from == "2026-10-10T01:21:20+00:00" and ram.count == 1
+    henderson = [e for e in data.events if "Henderson" in e["title"]]
+    assert henderson and "(saved copy)" in henderson[0]["source_name"] and not henderson[0]["is_live"]
+
+
+def test_ram_down_without_saved_copy_shows_nothing(monkeypatch, tmp_path):
+    from live import snapshots
+    monkeypatch.setattr(snapshots, "SNAPSHOT_DIR", str(tmp_path / "none"))
+    data = sources.load_live_data(35.77, -78.63, include_sites=False)
+    ram = next(s for s in data.statuses if s.key == "ram")
+    assert not ram.ok and not ram.saved_copy_from
+    assert not any("(saved copy)" in e["source_name"] for e in data.events)
+
+
+# ---------- answering from memory, refreshing in the background ----------
+
+def _wait_for_refreshes():
+    import time
+    for _ in range(200):
+        with sources._lock:
+            if not sources._refreshing:
+                return
+        time.sleep(0.01)
+
+
+def test_old_copy_answers_instantly_and_refreshes_in_background():
+    calls = []
+    def loader():
+        calls.append(1)
+        if len(calls) > 1:
+            import time; time.sleep(0.2)   # a slow refresh must not hold up the answer
+        return [{"n": len(calls)}]
+    key = ("test_source",)
+    assert sources._cached(key, loader)[0] == [{"n": 1}]          # first time: fetched now
+    sources._cache[key].refresh_at = 0                             # pretend 6 hours passed
+    import time; start = time.time()
+    records, error, _ = sources._cached(key, loader)
+    assert records == [{"n": 1}] and error is None                 # old copy, straight away
+    assert time.time() - start < 0.1
+    _wait_for_refreshes()
+    assert sources._cached(key, loader)[0] == [{"n": 2}]          # refreshed copy now in memory
+
+
+def test_failed_refresh_keeps_last_good_copy():
+    state = {"fail": False}
+    def loader():
+        if state["fail"]:
+            raise sources.SourceUnavailable("site down")
+        return [{"clinic": "A"}]
+    key = ("test_source2",)
+    _, _, first_checked = sources._cached(key, loader)
+    state["fail"] = True
+    sources._cache[key].refresh_at = 0
+    sources._cached(key, loader); _wait_for_refreshes()
+    records, error, checked = sources._cached(key, loader)
+    assert records == [{"clinic": "A"}] and error is None
+    assert checked == first_checked              # still shows when the data was really fetched
+    assert sources._cache[key].error == "site down"
+
+
+def test_after_restart_with_sources_down_saved_copies_are_used(monkeypatch, tmp_path):
+    from live import snapshots
+    monkeypatch.setattr(snapshots, "SNAPSHOT_DIR", str(tmp_path))
+    snapshots.save("hrsa", HRSA_FEATURES, "2026-10-10T01:21:17+00:00")
+    snapshots.save("nc_safety_net", NC_CSV, "2026-10-10T01:21:18+00:00")
+    data = sources.load_live_data(35.77, -78.63)          # everything offline, nothing in memory
+    status = {s.key: s for s in data.statuses}
+    assert status["hrsa"].saved_copy_from and status["nc_safety_net"].saved_copy_from
+    assert not data.using_saved_directory                   # saved copies beat the old built-in list
+    names = {s["name"] for s in data.sites}
+    assert {"Advance Community Health", "Open Door Clinic"} <= names
+    assert all("(saved copy)" in s["source_name"] and not s["is_live"] for s in data.sites)
+
+
+def test_warm_up_loads_clinics_in_background(monkeypatch):
+    monkeypatch.setattr(hrsa, "fetch", lambda state: hrsa.parse(HRSA_FEATURES, CHECKED))
+    sources.warm_up()
+    _wait_for_refreshes()
+    assert sources._cache[("hrsa", "NC")].records
+
+
+def test_slow_sites_time_out_quickly():
+    from live import common
+    assert common.TIMEOUT_SECONDS <= 8

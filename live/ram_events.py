@@ -8,13 +8,20 @@ need no ID, insurance or proof of income; those details are read from each
 event's own description rather than assumed.
 
 The feed has no map coordinates, so each clinic is placed at its ZIP code's center.
+
+RAM's website sometimes answers automated requests from cloud servers (like
+Streamlit Cloud) with a web page instead of the calendar. That is treated as
+"unavailable", never as "no clinics". In that case the app uses a saved copy of
+RAM's calendar (data/snapshots/ram.json, refreshed by running
+tools/check_live_sources.py), labeled with the date it was saved, and still hides
+clinics that have already ended.
 """
 import datetime
 import re
 from typing import Dict, List, Optional
 
-from live import zip_centroids
-from live.common import fetched_at, http_get, split_address, stable_id
+from live import snapshots, zip_centroids
+from live.common import SourceUnavailable, fetched_at, http_get, split_address, stable_id
 from live.records import make_event
 
 FEED_URL = "https://www.ramusa.org/?mec-ical-feed=1"
@@ -94,7 +101,8 @@ def parse(ics_text: str, checked: str, today: datetime.date) -> List[dict]:
         street, city, state, zip5 = split_address(location)
         coords = zip_centroids.coords_for_zip(zip5)
         desc_lower = description.lower()
-        is_free = "free" in desc_lower or "free" in title.lower()
+        # "Free" only when the care is called free, not "free parking" or "smoke-free campus"
+        is_free = bool(re.search(r"(?<![-\w])free(?!\s+parking)\b", f"{title}\n{description}", re.I))
         no_docs = "no id required" in desc_lower
         eligibility_bits = [s for s in ("Open to everyone.", "No ID required.", "No insurance required.",
                                         "No income requirements.") if s.lower() in desc_lower]
@@ -132,5 +140,17 @@ def parse(ics_text: str, checked: str, today: datetime.date) -> List[dict]:
     return events
 
 
+def fetch_raw() -> str:
+    text = http_get(FEED_URL).text
+    if "BEGIN:VCALENDAR" not in text:
+        start = " ".join(text.strip().split())[:80]
+        raise SourceUnavailable(f"RAM's site sent a web page instead of its calendar (starts: \"{start}\")")
+    return text
+
+
 def fetch(today: datetime.date) -> List[dict]:
-    return parse(http_get(FEED_URL, timeout=30).text, fetched_at(), today)
+    return parse(fetch_raw(), fetched_at(), today)
+
+
+def save_snapshot(ics_text: str, saved_at: str) -> None:
+    snapshots.save("ram", ics_text, saved_at, FEED_URL)

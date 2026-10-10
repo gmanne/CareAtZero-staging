@@ -20,7 +20,7 @@ import io
 from typing import List
 
 from live import zip_centroids
-from live.common import SourceUnavailable, clean_phone, fetched_at, http_get, stable_id
+from live.common import clean_phone, fetched_at, http_get, stable_id
 from live.records import make_site
 
 CSV_URL = "https://files.nc.gov/dhhs/2024-10/SafetyNetList_2024_05_29.csv?VersionId=RZ.SzREUlMozjDHiVvZ..WFWoArNAWHu"

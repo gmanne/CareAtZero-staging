@@ -88,32 +88,6 @@ def init_db(db_path: str = DB_PATH) -> None:
             );
         """)
 
-        # 4. Saved Care table - User bookmarked items (local device only)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS saved_care (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                care_record_id TEXT NOT NULL,
-                record_type TEXT NOT NULL, -- site, event
-                note TEXT,
-                saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(care_record_id, record_type)
-            );
-        """)
-
-        # 5. Search Profile table - Transient search state
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS search_profile (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                service TEXT,
-                location TEXT,
-                age_group TEXT,
-                insurance_status TEXT,
-                income_band TEXT,
-                timing TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
         conn.commit()
 
 
@@ -297,47 +271,3 @@ def get_event_by_id(event_id: str, db_path: str = DB_PATH) -> Optional[Dict[str,
             d["record_type"] = "event"
             return d
         return None
-
-
-def toggle_saved_care(record_id: str, record_type: str, note: str = "", db_path: str = DB_PATH) -> bool:
-    """Toggles bookmark for a site or event. Returns True if saved, False if removed."""
-    with get_connection(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM saved_care WHERE care_record_id = ? AND record_type = ?", (record_id, record_type))
-        exists = cursor.fetchone()
-        if exists:
-            cursor.execute("DELETE FROM saved_care WHERE care_record_id = ? AND record_type = ?", (record_id, record_type))
-            conn.commit()
-            return False
-        else:
-            cursor.execute("INSERT INTO saved_care (care_record_id, record_type, note) VALUES (?, ?, ?)", (record_id, record_type, note))
-            conn.commit()
-            return True
-
-
-def is_care_saved(record_id: str, record_type: str, db_path: str = DB_PATH) -> bool:
-    with get_connection(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM saved_care WHERE care_record_id = ? AND record_type = ?", (record_id, record_type))
-        return cursor.fetchone() is not None
-
-
-def get_all_saved_care(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
-    with get_connection(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM saved_care ORDER BY saved_at DESC")
-        saved_rows = cursor.fetchall()
-        results = []
-        for s in saved_rows:
-            r_id = s["care_record_id"]
-            r_type = s["record_type"]
-            note = s["note"]
-            if r_type == "site":
-                item = get_site_by_id(r_id, db_path=db_path)
-            else:
-                item = get_event_by_id(r_id, db_path=db_path)
-            if item:
-                item["saved_note"] = note
-                item["saved_at"] = s["saved_at"]
-                results.append(item)
-        return results

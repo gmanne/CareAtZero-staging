@@ -6,12 +6,14 @@ Source: HRSA "Health Care Service Delivery Sites" map service (public, no key ne
 
 HRSA-funded health centers must offer a sliding fee scale and serve everyone
 regardless of insurance or ability to pay, so they are labeled "Sliding Scale"
-(never "Free"). The feed lists sites, not services, so they are listed under
-Medical only.
+(never "Free"). The feed lists sites, not services, so the type of care comes
+from the site's name ("... Dental Center" -> Dental, "... Behavioral Health" ->
+Mental health), and Medical otherwise.
 """
 from typing import List
 
 from live.common import SourceUnavailable, clean_phone, fetched_at, http_get, stable_id
+from live.nc_safety_net import services_for
 from live.records import make_site
 
 QUERY_URL = ("https://gisportal.hrsa.gov/server/rest/services/HealthCareFacilities/"
@@ -79,7 +81,7 @@ def parse(features: List[dict], checked: str) -> List[dict]:
             longitude=float(lon),
             phone=clean_phone(a.get("SITE_PHONE_NUM") or ""),
             website=(a.get("SITE_URL") or "").strip(),
-            services=["Medical"],
+            services=services_for("", name),
             cost_class="Sliding Scale",
             eligibility=("Federally required sliding fee scale based on income; "
                          "care provided regardless of insurance status or ability to pay"),

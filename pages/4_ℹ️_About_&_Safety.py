@@ -10,7 +10,8 @@ if not sys.path or sys.path[0] != PROJECT_ROOT:
     sys.path.insert(0, PROJECT_ROOT)
 
 from live.sources import load_live_data
-from utils.dates import format_checked_date
+from utils.timezones import use_timezone_of
+from utils.dates import format_checked, timezone_label
 from utils.geo import geocode_location
 from utils.styles import inject_custom_css, render_header, LOGO_PATH
 
@@ -59,31 +60,41 @@ with t2:
     | **Time to Care / Availability** | **25%** | Pop-up event happening **Today (25 pts)** or **This Week (22-24 pts)**; permanent clinics with daily walk-in access receive 20-24 pts. |
     | **Service Match** | **15%** | Exact match for requested service (Dental, Medical, Vision, Behavioral Health) receives 15 pts. |
     | **Eligibility Confidence** | **10%** | Barrier-free clinics with no ID/income document barriers receive 10 pts; standard sliding scale verification receives 8 pts. |
-    | **Distance / Transit Burden** | **10%** | Proximity to user: <5 mi (10 pts), 5-15 mi (8 pts), 15-30 mi (6 pts), >30 mi (2-4 pts). |
-    | **Data Freshness & Completeness** | **5%** | Verified from official directory in the current cycle (5 pts); stale or unverified records are penalized. |
+    | **Distance / Transit Burden** | **10%** | Proximity to user: under 5 mi (10 pts), 5-12 mi (8 pts), 12-25 mi (6 pts), 25-50 mi (4 pts), over 50 mi (2 pts). |
+    | **Data Freshness & Completeness** | **5%** | Checked from an official source in the last 60 days (5 pts); older or unverified records get fewer points. |
     """)
 
     st.info("💡 **Strict Business Rule:** A provider is **never labeled Free** unless the underlying source explicitly verifies $0 patient charge for that service.")
 
 with t3:
     st.subheader("Live data sources")
-    st.markdown("Every search uses current records from these official public sources, "
-                "fetched automatically and refreshed every few hours:")
+    st.markdown("Every search uses records from these official public sources. The app fetches them "
+                "automatically, keeps them in memory, and refreshes them in the background every 6 hours, "
+                "so searches are instant:")
 
-    search_loc = st.session_state.get("search_loc") or "27601"
-    a_lat, a_lon, _ = geocode_location(search_loc)
+    search_loc = st.session_state.get("search_loc")
+    a_lat = a_lon = None
+    place = geocode_location(search_loc) if search_loc else None
+    if place:
+        a_lat, a_lon, _ = place
+        use_timezone_of(a_lat, a_lon)
     with st.spinner("Checking the live sources..."):
         live = load_live_data(a_lat, a_lon)
+    if not place:
+        st.caption("SAMHSA's mental health listings are searched around your location, "
+                   "so their status appears after you search a ZIP code.")
 
     rows = []
     for src in live.statuses:
         rows.append({
             "Source": f"[{src.name}]({src.url})",
             "Provides": src.provides,
-            "Status": f"Live · {src.count} records" if src.ok else "Unavailable right now",
-            "Checked": format_checked_date(src.checked),
+            "Status": (f"Live · {src.count} records" if src.ok else
+                       f"Live site unreachable · showing saved copy from {format_checked(src.saved_copy_from)} ({src.count} records)"
+                       if src.saved_copy_from else "Unavailable right now"),
+            "Checked": format_checked(src.checked),
         })
-    st.markdown("| Source | Provides | Status | Checked |\n|---|---|---|---|\n" +
+    st.markdown("| Source | Provides | Status | Checked (" + timezone_label() + ") |\n|---|---|---|---|\n" +
                 "\n".join(f"| {r['Source']} | {r['Provides']} | {r['Status']} | {r['Checked']} |" for r in rows))
 
     st.markdown("""
@@ -93,9 +104,15 @@ with t3:
   a schedule online. These are entered by hand from the organizer, marked *manually verified*, and shown
   only until their end date.
 
-**If a source is down**, the app leaves it out and says so, instead of guessing. If every clinic source
-is down, it shows a saved copy of the CareAtZero directory (last verified September 2026), clearly labeled.
+**If a source is down**, the app keeps showing the last copy it fetched, with that copy's real date and time.
+If the app has just restarted and a source can't be reached, it uses a saved copy of that source kept with the
+app, labeled "saved copy" with its date. It never makes up data, and it never shows an old copy as live.
     """)
+    down = [s for s in live.statuses if not s.ok]
+    if down:
+        with st.expander("Why is a source unavailable?"):
+            for s in down:
+                st.markdown(f"- **{s.name}:** {s.error or 'no answer'}")
     if live.using_saved_directory:
         st.warning("Right now the live clinic sources can't be reached, so searches use the saved directory.")
 
