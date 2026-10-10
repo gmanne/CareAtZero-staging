@@ -118,9 +118,6 @@ with t3:
     st.markdown("""
 **Also used**
 - **U.S. Census Bureau ZIP code list**, to place any U.S. ZIP code on the map.
-- **Community pop-up events** (mobile dental buses, county health vans and similar) that don't publish
-  a schedule online. These are entered by hand from the organizer, marked *manually verified*, and shown
-  only until their end date.
 
 **If a source is down**, the app keeps showing the last copy it fetched, with that copy's real date and time.
 If the app has just restarted and a source can't be reached, it uses a saved copy of that source kept with the
