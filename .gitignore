@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Antigravity & IDE
+.agents/
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Raw downloads saved by tools/check_live_sources.py (for local testing only)
+tools/samples/
