@@ -1,5 +1,6 @@
-import datetime
-from typing import Dict, Any
+from typing import Any, Dict
+
+from utils.dates import format_checked, today
 
 
 def generate_shareable_referral_text(record: Dict[str, Any], score: int, reasons: list) -> str:
@@ -17,13 +18,13 @@ def generate_shareable_referral_text(record: Dict[str, Any], score: int, reasons
     appt_rule = record.get("appointment_rule", "Call ahead")
     eligibility = record.get("eligibility", "Open to community")
     docs = ", ".join(record.get("documents_required", [])) if record.get("documents_required") else "None specified"
-    last_checked = record.get("last_checked", "Recently verified")
+    last_checked = format_checked(record.get("last_checked")) if record.get("last_checked") else "Recently verified"
 
     reasons_fmt = "\n".join([f"  • {r}" for r in reasons[:3]])
 
     referral = f"""====================================================
 CareAtZero - Safety-Net Healthcare Referral Summary
-Generated: {datetime.date.today().strftime('%B %d, %Y')}
+Generated: {today():%B} {today().day}, {today().year}
 ====================================================
 
 PROVIDER / CLINIC:

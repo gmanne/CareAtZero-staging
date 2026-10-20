@@ -1,4 +1,5 @@
 import math
+import re
 import urllib.request
 import json
 import os
@@ -16,6 +17,15 @@ US_SIMULATION_PRESETS: Dict[str, str] = {
     "Mountain View, CA": "66.249.66.1",
     "Pittsburgh, PA": "128.2.0.1",
 }
+
+
+def _in_streamlit_session() -> bool:
+    """True while running a user's Streamlit session (each user has their own)."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:
+        return False
 
 
 def safe_city_name(city: str) -> str:
@@ -93,152 +103,88 @@ def is_datacenter_location(loc: Dict[str, Any]) -> bool:
     return False
 
 
+BROWSER_SOURCES = ("browser_gps", "browser_ip", "client_browser")
+_geo_component = None
+
+
+def _browser_geo_component():
+    global _geo_component
+    if _geo_component is None:
+        import streamlit.components.v1 as components
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "components", "geo_detector")
+        _geo_component = components.declare_component("careatzero_geo", path=path)
+    return _geo_component
+
+
+def location_from_browser(found: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Turn what the browser detector sent back into a location dict, or None if it found nothing usable."""
+    if not isinstance(found, dict) or found.get("source") not in ("browser_gps", "browser_ip"):
+        return None
+    lat, lon = found.get("lat"), found.get("lon")
+    try:
+        lat = float(lat) if lat is not None else None
+        lon = float(lon) if lon is not None else None
+    except (TypeError, ValueError):
+        lat = lon = None
+    zip_code = str(found.get("zip") or "").strip()[:5]
+    if not zip_code and lat is not None and lon is not None:
+        try:  # GPS gives coordinates only: find the nearest ZIP code offline
+            from live.zip_centroids import nearest_zip
+            zip_code = nearest_zip(lat, lon) or ""
+        except Exception:
+            zip_code = ""
+    if not (len(zip_code) == 5 and zip_code.isdigit()):
+        return None
+    city = safe_city_name(found.get("city") or "")
+    if not city and zip_code in NC_ZIP_COORDINATES:  # GPS gives no city name; use the known area name
+        city = NC_ZIP_COORDINATES[zip_code][2]
+    loc = {"zip": zip_code, "city": city, "region": found.get("region") or "",
+           "country": "US", "lat": lat, "lon": lon, "source": found["source"]}
+    # A cloud data center can only be a mistake for internet-address lookups, never for GPS
+    if found["source"] == "browser_ip" and is_datacenter_location(loc):
+        return None
+    return loc
+
+
 def inject_client_geo_detector():
     """
-    Injects a client-side detector that fetches the user's real location directly in their browser
-    (phone or desktop), prioritizing HTML5 GPS coordinates, then ipinfo.io, then fallback services.
+    Finds the user's location in their own browser (GPS if allowed, otherwise their
+    internet connection's location) and returns it to THIS session through a small
+    Streamlit component (components/geo_detector). No page reloads.
+
+    Runs once per session (again after "Use my location"). When the result arrives:
+    - it is saved as this session's detected location (never shared with other users);
+    - if the search box was filled automatically (not typed by the user), it is updated
+      to the more accurate ZIP code and the screen refreshes.
     """
     try:
         import streamlit as st
-        import streamlit.components.v1 as components
-
-        # Skip if already resolved in session_state
-        if hasattr(st, "session_state"):
-            loc = st.session_state.get("detected_user_location")
-            if loc and loc.get("source") in ("client_browser", "simulated_zip", "simulated_ip"):
-                return
-
-        if hasattr(st, "query_params"):
-            if st.query_params.get("client_zip") or st.query_params.get("geo_checked") or st.query_params.get("simulated_zip"):
-                return
-
-        js_detector = """
-        <script>
-        (function() {
-            try {
-                var pLoc = window.parent.location;
-                var url = new URL(pLoc.href);
-                if (url.searchParams.get("client_zip") || url.searchParams.get("geo_checked") || url.searchParams.get("simulated_zip")) {
-                    return;
-                }
-
-                async function applyGeo(zip, city, lat, lon) {
-                    if (zip) url.searchParams.set("client_zip", zip);
-                    if (city) url.searchParams.set("client_city", city);
-                    if (lat) url.searchParams.set("client_lat", lat);
-                    if (lon) url.searchParams.set("client_lon", lon);
-                    url.searchParams.set("geo_checked", "1");
-                    try {
-                        pLoc.replace(url.href);
-                    } catch(e) {
-                        window.location.replace(url.href);
-                    }
-                }
-
-                async function detectLocation() {
-                    // 1. Try HTML5 Geolocation (GPS hardware on mobile / Wi-Fi positioning on desktop)
-                    if (navigator.geolocation) {
-                        try {
-                            var position = await new Promise(function(resolve, reject) {
-                                navigator.geolocation.getCurrentPosition(resolve, reject, {
-                                    timeout: 3000,
-                                    maximumAge: 120000,
-                                    enableHighAccuracy: true
-                                });
-                            });
-                            if (position && position.coords) {
-                                var lat = position.coords.latitude;
-                                var lon = position.coords.longitude;
-                                // Reverse-geocode via Nominatim
-                                try {
-                                    var nomResp = await fetch("https://nominatim.openstreetmap.org/reverse?format=json&lat=" + lat + "&lon=" + lon, { cache: "no-store" });
-                                    if (nomResp.ok) {
-                                        var nomData = await nomResp.json();
-                                        var addr = nomData.address || {};
-                                        var zip = addr.postcode;
-                                        var city = addr.city || addr.town || addr.village || addr.suburb || addr.county || "";
-                                        if (zip) {
-                                            applyGeo(zip, city, lat, lon);
-                                            return;
-                                        }
-                                    }
-                                } catch(e) {}
-                                // Reverse-geocode via BigDataCloud
-                                try {
-                                    var bdcResp = await fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=" + lat + "&longitude=" + lon + "&localityLanguage=en", { cache: "no-store" });
-                                    if (bdcResp.ok) {
-                                        var bdcData = await bdcResp.json();
-                                        var zip = bdcData.postcode;
-                                        var city = bdcData.locality || bdcData.city || "";
-                                        if (zip) {
-                                            applyGeo(zip, city, lat, lon);
-                                            return;
-                                        }
-                                    }
-                                } catch(e) {}
-                            }
-                        } catch(geoErr) {
-                            // GPS denied or timed out, fall through to IP detection
-                        }
-                    }
-
-                    // 2. Primary IP service: ipinfo.io (most accurate for Indian and US networks)
-                    try {
-                        var rInfo = await fetch("https://ipinfo.io/json", { cache: "no-store" });
-                        if (rInfo.ok) {
-                            var dInfo = await rInfo.json();
-                            if (dInfo && dInfo.postal) {
-                                var lat = null, lon = null;
-                                if (dInfo.loc) {
-                                    var parts = dInfo.loc.split(",");
-                                    lat = parts[0]; lon = parts[1];
-                                }
-                                applyGeo(dInfo.postal, dInfo.city || "", lat, lon);
-                                return;
-                            }
-                        }
-                    } catch(e) {}
-
-                    // 3. Secondary IP service: ipapi.co
-                    try {
-                        var rCo = await fetch("https://ipapi.co/json/", { cache: "no-store" });
-                        if (rCo.ok) {
-                            var dCo = await rCo.json();
-                            if (dCo && dCo.postal) {
-                                applyGeo(dCo.postal, dCo.city || "", dCo.latitude, dCo.longitude);
-                                return;
-                            }
-                        }
-                    } catch(e) {}
-
-                    // 4. Tertiary IP service: freeipapi
-                    try {
-                        var rFree = await fetch("https://freeipapi.com/api/json", { cache: "no-store" });
-                        if (rFree.ok) {
-                            var dFree = await rFree.json();
-                            if (dFree && dFree.zipCode) {
-                                applyGeo(dFree.zipCode, dFree.cityName || "", dFree.latitude, dFree.longitude);
-                                return;
-                            }
-                        }
-                    } catch(e) {}
-
-                    // If all failed, mark geo_checked so it does not loop
-                    url.searchParams.set("geo_checked", "1");
-                    try { pLoc.replace(url.href); } catch(e) { window.location.replace(url.href); }
-                }
-
-                detectLocation();
-            } catch(err) {
-                console.warn("Client geo skipped:", err);
-            }
-        })();
-        </script>
-        """
-        components.html(js_detector, height=0, width=0)
-    except Exception:
-        pass
-
+        if not _in_streamlit_session():
+            return
+        state = st.session_state
+        loc = state.get("detected_user_location")
+        if (loc and loc.get("source") in BROWSER_SOURCES) or state.get("browser_location_checked"):
+            return
+        attempt = state.get("geo_attempt", 0)
+        found = _browser_geo_component()(key=f"geo_detect_{attempt}", default=None)
+        if found is None:
+            return  # still detecting
+        state["browser_location_checked"] = True
+        browser_loc = location_from_browser(found)
+        if not browser_loc:
+            return
+        state["detected_user_location"] = browser_loc
+        if not state.get("search_loc") or state.get("search_loc_auto", True):
+            if state.get("search_loc") != browser_loc["zip"]:
+                state["search_loc"] = browser_loc["zip"]
+                state["search_loc_auto"] = True
+                state["home_search_loc_input"] = browser_loc["zip"]  # show the new ZIP in the box
+                st.rerun()
+    except Exception as e:
+        if type(e).__name__ in ("RerunException", "StopException"):
+            raise
+        return
 
 def set_simulated_location(ip_or_preset: Optional[str] = None, force_zip: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -310,7 +256,8 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
                 }
                 if hasattr(st, "session_state"):
                     st.session_state["detected_user_location"] = client_loc
-                _CACHED_USER_LOCATION = client_loc
+                if not _in_streamlit_session():
+                    _CACHED_USER_LOCATION = client_loc
                 # Remove client_zip from query_params to keep the URL clean and avoid overriding user searches
                 st.query_params.pop("client_zip", None)
                 st.query_params.pop("client_city", None)
@@ -318,10 +265,11 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
                 st.query_params.pop("client_lon", None)
                 return client_loc
 
-            if "simulated_ip" in st.query_params:
-                target_ip = st.query_params["simulated_ip"]
-            if "simulated_zip" in st.query_params:
-                target_zip = st.query_params["simulated_zip"]
+            if os.environ.get("CAREATZERO_DEBUG") == "1":  # testing tool, off on the live site
+                if "simulated_ip" in st.query_params:
+                    target_ip = st.query_params["simulated_ip"]
+                if "simulated_zip" in st.query_params:
+                    target_zip = st.query_params["simulated_zip"]
 
         if hasattr(st, "session_state"):
             if not target_ip and "simulated_ip" in st.session_state:
@@ -337,8 +285,10 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
     except Exception:
         pass
 
-    # Outside Streamlit (e.g. pytest): check global cache if valid
-    if _CACHED_USER_LOCATION is not None and _CACHED_USER_LOCATION.get("source") != "fallback" and not force_refresh and not target_ip and not target_zip and not is_datacenter_location(_CACHED_USER_LOCATION):
+    # Outside Streamlit (e.g. pytest): check global cache if valid.
+    # Never inside a user's session: this cache is shared by everyone on the server,
+    # so using it there could show one user another user's location.
+    if not _in_streamlit_session() and _CACHED_USER_LOCATION is not None and _CACHED_USER_LOCATION.get("source") != "fallback" and not force_refresh and not target_ip and not target_zip and not is_datacenter_location(_CACHED_USER_LOCATION):
         return _CACHED_USER_LOCATION
 
     # If target_zip is directly specified
@@ -352,7 +302,8 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
             "lon": -78.6386,
             "source": "simulated_zip"
         }
-        _CACHED_USER_LOCATION = loc
+        if not _in_streamlit_session():
+            _CACHED_USER_LOCATION = loc
         try:
             import streamlit as st
             if hasattr(st, "session_state"):
@@ -360,6 +311,17 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
         except Exception:
             pass
         return loc
+
+    # A server-side lookup already failed in this session: don't wait on it again on every screen
+    # (the browser detector or the user's own ZIP takes over; "Use my location" retries).
+    try:
+        import streamlit as st
+        if (_in_streamlit_session() and not force_refresh and not target_ip and not target_zip
+                and st.session_state.get("server_location_lookup_failed")):
+            return {"zip": DEFAULT_FALLBACK_ZIP, "city": "", "region": "", "country": "",
+                    "lat": None, "lon": None, "source": "fallback"}
+    except Exception:
+        pass
 
     # If target_ip not explicitly set, extract real client IP from incoming request
     if not target_ip:
@@ -430,7 +392,8 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
             continue
 
     if detected:
-        _CACHED_USER_LOCATION = detected
+        if not _in_streamlit_session():
+            _CACHED_USER_LOCATION = detected
         try:
             import streamlit as st
             if hasattr(st, "session_state"):
@@ -438,6 +401,13 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
         except Exception:
             pass
         return detected
+
+    try:
+        import streamlit as st
+        if _in_streamlit_session():
+            st.session_state["server_location_lookup_failed"] = True
+    except Exception:
+        pass
 
     # Return fallback without poisoning cache
     fallback = {
@@ -454,11 +424,14 @@ def detect_user_location(force_refresh: bool = False, simulated_ip: Optional[str
 
 def get_user_current_zip() -> str:
     """
-    Returns the user's current detected ZIP/postal code based on their actual location,
-    falling back to 27514 if location detection is unavailable.
+    Returns the user's detected ZIP/postal code, or "" if their location couldn't be
+    detected. The app then asks "Enter your ZIP code" instead of guessing a location,
+    since it is meant to work anywhere in the U.S.
     """
     loc = detect_user_location()
-    return loc.get("zip") or DEFAULT_FALLBACK_ZIP
+    if not loc or loc.get("source") == "fallback":
+        return ""
+    return str(loc.get("zip") or "").strip()
 
 
 # Pre-compiled coordinate reference for NC Research Triangle & regional ZIP codes
@@ -530,8 +503,6 @@ NC_ZIP_COORDINATES: Dict[str, Tuple[float, float, str]] = {
 }
 
 # Default anchor: Research Triangle centroid
-DEFAULT_LAT = 35.8800
-DEFAULT_LON = -78.8500
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -551,51 +522,62 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return round(distance, 1)
 
 
-def geocode_location(location_query: str) -> Tuple[float, float, str]:
+def geocode_location(location_query: str) -> Optional[Tuple[float, float, str]]:
     """
-    Resolves a location string (e.g. '27514', 'Raleigh', 'Durham') to (lat, lon, label).
-    Dynamically checks the user's detected location if the query matches their ZIP.
+    Turns what the user typed (a ZIP code like '27514' or '27514-1234', or a city
+    like 'Raleigh') into (lat, lon, label). Returns None if the place isn't known,
+    so the screen can say so; it never guesses a location.
     """
-    cleaned = location_query.strip().upper()
+    cleaned = (location_query or "").strip().upper()
+    if not cleaned:
+        # Never guess a location: the screens ask "Enter your ZIP code" before calling this.
+        raise ValueError("No location given; ask the user for a ZIP code or city.")
+    zip_match = re.fullmatch(r"(\d{5})(?:-\d{4})?", cleaned)
+    zip5 = zip_match.group(1) if zip_match else None
 
-    # Direct ZIP match in known NC coordinate table
-    if cleaned in NC_ZIP_COORDINATES:
-        lat, lon, label = NC_ZIP_COORDINATES[cleaned]
-        return lat, lon, label
+    # ZIP code in the known NC table
+    if zip5 and zip5 in NC_ZIP_COORDINATES:
+        return NC_ZIP_COORDINATES[zip5]
 
-    # Check if query matches user's current detected location
+    # The user's own detected location (has exact coordinates; may be a non-U.S. postal code)
     user_loc = detect_user_location()
-    if user_loc and cleaned == str(user_loc.get("zip", "")).upper():
+    detected = str(user_loc.get("zip", "")).upper()
+    if detected and (zip5 or cleaned) == detected and user_loc.get("source") != "fallback":
         if user_loc.get("lat") is not None and user_loc.get("lon") is not None:
             city_str = user_loc.get("city") or "Current Location"
-            reg_str = user_loc.get("region") or ""
-            label = f"{city_str}, {reg_str} ({cleaned})".strip(" ,")
+            label = f"{city_str} ({detected})" if detected not in city_str else city_str
             return user_loc["lat"], user_loc["lon"], label
 
-    # Fuzzy name match in our database
-    for zip_code, (lat, lon, label) in NC_ZIP_COORDINATES.items():
-        if cleaned in label.upper():
-            return lat, lon, label
+    # Any other U.S. ZIP: its center from the U.S. Census ZIP list
+    if zip5:
+        try:
+            from live.zip_centroids import coords_for_zip
+            coords = coords_for_zip(zip5)
+        except Exception:
+            coords = None
+        return (coords[0], coords[1], f"ZIP {zip5}") if coords else None
 
-    # City defaults
-    if "RALEIGH" in cleaned:
-        return NC_ZIP_COORDINATES["27601"]
-    elif "DURHAM" in cleaned:
-        return NC_ZIP_COORDINATES["27701"]
-    elif "CHAPEL HILL" in cleaned:
-        return NC_ZIP_COORDINATES["27514"]
-    elif "CARY" in cleaned:
-        return NC_ZIP_COORDINATES["27511"]
-    elif "CHARLOTTE" in cleaned:
-        return NC_ZIP_COORDINATES["28202"]
-    elif "GREENSBORO" in cleaned:
-        return NC_ZIP_COORDINATES["27401"]
+    # City name: match whole words against the known NC areas ("Cary", "Chapel Hill, NC")
+    city = re.sub(r",?\s*(NC|NORTH CAROLINA)\s*$", "", cleaned).strip()
+    if len(city) >= 3:
+        for zip_code, (lat, lon, label) in NC_ZIP_COORDINATES.items():
+            words = re.split(r"[^A-Z]+", label.upper())
+            name = " ".join(w for w in words if w)
+            if re.search(rf"(^| ){re.escape(city)}( |$)", name):
+                return lat, lon, label
+    return None
 
-    # Numeric ZIP (5 or 6 digit) not in local cache
-    if cleaned.isdigit():
-        return DEFAULT_LAT, DEFAULT_LON, f"ZIP {cleaned} (Area)"
 
-    return DEFAULT_LAT, DEFAULT_LON, "Research Triangle, NC"
+def in_nc_pilot(lat: float, lon: float) -> bool:
+    """True if the location is in North Carolina (ZIP codes 27xxx-28xxx), where clinic listings are covered."""
+    if any(abs(lat - la) < 1e-6 and abs(lon - lo) < 1e-6 for la, lo, _ in NC_ZIP_COORDINATES.values()):
+        return True
+    try:
+        from live.zip_centroids import nearest_zip
+        z = nearest_zip(lat, lon)
+    except Exception:
+        return True  # can't tell: don't show a warning
+    return z is None or z[:2] in ("27", "28")
 
 
 def get_directions_url(address: str, destination_lat: Optional[float] = None, destination_lon: Optional[float] = None) -> str:

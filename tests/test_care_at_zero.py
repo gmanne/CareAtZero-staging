@@ -10,13 +10,11 @@ if PROJECT_ROOT not in sys.path:
 
 from database.db import (
     init_db, get_connection, insert_care_site, insert_care_event,
-    get_all_sites, get_all_events, get_site_by_id, toggle_saved_care,
-    is_care_saved, get_all_saved_care
+    get_all_sites, get_all_events, get_site_by_id
 )
 from data.seed_data import seed_database
 from scoring.care_access_score import calculate_care_access_score
-from connectors.hrsa_connector import HRSAHealthCenterConnector
-from connectors.mobile_care_connector import MobileCareNetworkConnector
+from live import hrsa
 from utils.geo import haversine_distance, geocode_location
 from utils.calendar import generate_ics_calendar
 
@@ -57,17 +55,10 @@ def test_tc01_search_dental_uninsured(test_db):
 
 def test_tc02_cost_classification_integrity():
     """TC-02: A source that says sliding fee must be labeled Sliding Scale, never Free."""
-    hrsa = HRSAHealthCenterConnector()
-    raw_fqhc = {
-        "id": "test_fqhc_1",
-        "name": "Community Health Center",
-        "address": "123 Main St",
-        "city": "Raleigh",
-        "services": ["Medical", "Dental"],
-        "is_free_care": False,
-        "nominal_fee_only": False
-    }
-    normalized = hrsa.normalize_record(raw_fqhc)
+    raw_fqhc = {"attributes": {"OBJECTID": 1, "SITE_NM": "Community Health Center", "SITE_ADDRESS": "123 Main St",
+                               "SITE_CITY": "RALEIGH", "SITE_STATE_ABBR": "NC", "SITE_ZIP_CD": "27601"},
+                "geometry": {"x": -78.63, "y": 35.77}}
+    normalized = hrsa.parse([raw_fqhc], "2026-09-16T12:00:00+00:00")[0]
     assert normalized["cost_class"] == "Sliding Scale"
     assert normalized["cost_class"] != "Free"
 
@@ -151,7 +142,7 @@ def test_tc06_privacy_compliance(test_db):
     cursor = conn.cursor()
 
     # Inspect all table column names
-    for table_name in ["search_profile", "care_sites", "care_events", "saved_care", "sources"]:
+    for table_name in ["care_sites", "care_events", "sources"]:
         cursor.execute(f"PRAGMA table_info({table_name})")
         columns = [row["name"].lower() for row in cursor.fetchall()]
         forbidden = ["ssn", "social_security", "diagnosis", "medical_record", "phi", "symptom", "health_history"]
@@ -181,6 +172,7 @@ def test_tc08_geospatial_distance():
     """TC-08: Haversine distance correctly calculates mileage between Triangle locations."""
     # Distance between Chapel Hill (27514) and Raleigh Downtown (27601) is ~25-28 miles
     lat_ch, lon_ch, _ = geocode_location("27514")
+    assert geocode_location("Nashville, TN") is None  # unknown places are never guessed
     lat_ral, lon_ral, _ = geocode_location("27601")
 
     dist = haversine_distance(lat_ch, lon_ch, lat_ral, lon_ral)

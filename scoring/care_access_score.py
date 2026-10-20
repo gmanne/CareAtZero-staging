@@ -1,5 +1,7 @@
 import datetime
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
+
+from utils.dates import format_checked, today_str
 
 
 def calculate_care_access_score(
@@ -7,9 +9,9 @@ def calculate_care_access_score(
     service_needed: str,
     distance_miles: float,
     timing_pref: str = "Flexible",
-    user_insurance: str = "Uninsured",
+    user_insurance: str = "Uninsured",  # kept for older callers; the app is for uninsured users
     user_income_band: str = "Under $25k",
-    reference_date_str: str = "2026-09-16"
+    reference_date_str: Optional[str] = None
 ) -> Tuple[int, Dict[str, int], List[str]]:
     """
     Calculates transparent 100-point Care Access Score and provides
@@ -59,11 +61,12 @@ def calculate_care_access_score(
         event_start = record.get("date_start", "")
         if event_start:
             try:
-                ref_dt = datetime.date.fromisoformat(reference_date_str)
+                ref_dt = datetime.date.fromisoformat(reference_date_str or today_str())
                 evt_dt = datetime.date.fromisoformat(event_start)
+                evt_end = datetime.date.fromisoformat(record.get("date_end") or event_start)
                 days_until = (evt_dt - ref_dt).days
 
-                if days_until == 0:
+                if evt_dt <= ref_dt <= evt_end:  # first day or a later day of a multi-day event
                     time_pts = 25
                     reasons.append("Pop-up care event is happening TODAY.")
                 elif 1 <= days_until <= 3:
@@ -93,9 +96,9 @@ def calculate_care_access_score(
             else:
                 time_pts = 20
                 reasons.append("Walk-ins accepted during regular clinic hours.")
-        elif "call" in appt_rule or "same-day" in appt_rule:
+        elif "same-day" in appt_rule or "same day" in appt_rule:
             time_pts = 18
-            reasons.append("Same-day or fast triage appointments available via telephone call.")
+            reasons.append("Same-day appointments available.")
         else:
             time_pts = 15
             reasons.append("Regular clinic appointments scheduled on intake.")
@@ -170,10 +173,16 @@ def calculate_care_access_score(
     last_checked = record.get("last_checked", "")
     freshness_pts = 4
 
+    try:
+        checked_day = datetime.date.fromisoformat(str(last_checked)[:10])
+        ref_day = datetime.date.fromisoformat(reference_date_str or today_str())
+        recent = (ref_day - checked_day).days <= 60
+    except ValueError:
+        recent = False
     if source_status == "active":
-        if "2026" in last_checked or "2025" in last_checked:
+        if recent:
             freshness_pts = 5
-            reasons.append(f"Source verified recently ({last_checked}) from official provider directory.")
+            reasons.append(f"Source checked recently ({format_checked(last_checked)}) from an official provider directory.")
         else:
             freshness_pts = 4
     elif source_status == "stale":

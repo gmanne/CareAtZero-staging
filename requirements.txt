@@ -1,6 +1,6 @@
-streamlit>=1.30.0
-pandas>=2.0.0
-requests>=2.31.0
-folium>=0.15.0
-streamlit-folium>=0.16.0
-pytest>=7.4.0
+streamlit>=1.50,<2
+requests>=2.31
+folium>=0.15
+streamlit-folium>=0.16
+tzdata>=2024.1
+timezonefinder>=6.5

@@ -12,8 +12,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from scoring.care_access_score import calculate_care_access_score
-from database.db import get_all_sites, get_all_events, get_site_by_id, get_event_by_id
+from database.db import get_all_sites, get_all_events
 from utils.geo import geocode_location, haversine_distance, get_user_current_zip
+from utils.dates import today_str
 
 
 def log_debug(msg):
@@ -85,9 +86,12 @@ def tool_simulate_user_journey(persona: str, service: str, location: str, timing
     4. Ranks realistic matches
     5. Validates document checklist & source freshness
     """
-    lat, lon, label = geocode_location(location)
+    place = geocode_location(location)
+    if place is None:
+        return {"persona": persona, "error": f"Unknown location '{location}'; use a 5-digit ZIP code."}
+    lat, lon, label = place
     sites = get_all_sites()
-    events = get_all_events(include_expired=False, current_date_str="2026-09-16")
+    events = get_all_events(include_expired=False, current_date_str=today_str())
     all_recs = sites + events
 
     matched = []
@@ -106,7 +110,7 @@ def tool_simulate_user_journey(persona: str, service: str, location: str, timing
             distance_miles=dist,
             timing_pref=timing,
             user_income_band="Under $25k",
-            reference_date_str="2026-09-16"
+            reference_date_str=today_str()
         )
 
         matched.append({
@@ -219,6 +223,9 @@ def handle_request(req: dict) -> dict:
             res = tool_browser_navigate(args.get("url", "http://localhost:8501"))
         elif tool_name == "browser_test_health":
             res = tool_test_health(args.get("base_url", "http://localhost:8501"))
+        elif tool_name == "browser_simulate_journey" and not (args.get("location") or get_user_current_zip()):
+            return {"jsonrpc": "2.0", "id": req_id,
+                    "error": {"code": -32602, "message": "Location couldn't be detected; pass a 'location' (ZIP code or city)."}}
         elif tool_name == "browser_simulate_journey":
             res = tool_simulate_user_journey(
                 persona=args.get("persona", "Uninsured User"),
